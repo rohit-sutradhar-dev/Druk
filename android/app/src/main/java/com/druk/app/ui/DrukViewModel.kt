@@ -279,7 +279,6 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
                 nowMillis = nowMillis
             )
         }
-        scheduleFrom(state.value)
     }
 
     private fun scheduleFrom(current: DrukUiState) {
