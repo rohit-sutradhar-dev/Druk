@@ -47,6 +47,7 @@ data class DrukUiState(
     val projectionCurve: List<BacPoint> = emptyList(),
     val nowMillis: Long = System.currentTimeMillis(),
     val setup: SetupDraft = SetupDraft(),
+    val sessionDraft: SessionDraft = SessionDraft(),
     val customDrink: DrinkDraft = DrinkDraft(),
     val mealDraft: MealDraft = MealDraft(),
     val permissionRequested: Boolean = false
@@ -57,6 +58,12 @@ data class SetupDraft(
     val sex: Sex = Sex.Male,
     val weightKg: String = "",
     val heightCm: String = "",
+    val drinkName: String = "Old Monk",
+    val drinkAbv: String = "42.8",
+    val caloriesPer30Ml: String = "71"
+)
+
+data class SessionDraft(
     val drinkName: String = "Old Monk",
     val drinkAbv: String = "42.8",
     val caloriesPer30Ml: String = "71"
@@ -143,6 +150,10 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(customDrink = transform(it.customDrink)) }
     }
 
+    fun updateSessionDraft(transform: (SessionDraft) -> SessionDraft) {
+        _state.update { it.copy(sessionDraft = transform(it.sessionDraft)) }
+    }
+
     fun updateMealDraft(transform: (MealDraft) -> MealDraft) {
         _state.update { it.copy(mealDraft = transform(it.mealDraft)) }
     }
@@ -151,17 +162,15 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
         val draft = state.value.setup
         val weight = draft.weightKg.toDoubleOrNull()?.coerceIn(30.0, 250.0) ?: return
         val height = draft.heightCm.toDoubleOrNull()?.coerceIn(100.0, 250.0) ?: return
-        val abv = draft.drinkAbv.toDoubleOrNull()?.coerceIn(1.0, 99.0) ?: return
-        val calories = draft.caloriesPer30Ml.toDoubleOrNull()?.coerceAtLeast(0.0) ?: return
         val profile = UserProfile(
             name = draft.name.trim().ifBlank { "You" },
             sex = draft.sex,
             weightKg = weight,
             heightCm = height,
             r = BacEngine.seidlR(draft.sex, weight, height),
-            drinkName = draft.drinkName.trim().ifBlank { "House drink" },
-            drinkAbv = abv,
-            caloriesPer30Ml = calories
+            drinkName = "House drink",
+            drinkAbv = 42.8,
+            caloriesPer30Ml = 71.0
         )
         viewModelScope.launch {
             repository.saveProfile(profile)
@@ -169,9 +178,13 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startSession() {
+        val draft = state.value.sessionDraft
+        val drinkName = draft.drinkName.trim().ifBlank { "House drink" }
+        val abv = draft.drinkAbv.toDoubleOrNull()?.coerceIn(1.0, 99.0) ?: return
+        val calories = draft.caloriesPer30Ml.toDoubleOrNull()?.coerceAtLeast(0.0) ?: return
         viewModelScope.launch {
             val started = System.currentTimeMillis()
-            repository.startSession(started)
+            repository.startSession(started, drinkName, abv, calories)
             now.value = started
             scheduleFrom(state.value)
         }
@@ -215,7 +228,7 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startDrink(volumeMl: Double? = null, foodLevel: FoodLevel? = null) {
-        val profile = state.value.profile ?: return
+        val profile = state.value.sessionProfile() ?: return
         val settings = state.value.settings
         val draft = state.value.customDrink
         val volume = volumeMl ?: draft.volumeMl.toDoubleOrNull()?.coerceIn(1.0, 1000.0) ?: 30.0
@@ -268,9 +281,16 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
         val profile = base.profile
         val session = base.activeSession
         val nowMillis = base.nowMillis
-        val currentBac = BacEngine.bacAt(full.drinks, profile, nowMillis)
-        val pacer = BacEngine.pacerState(profile, session, full.drinks, base.settings.selectedScheme, base.settings.foodLevel, nowMillis)
-        val plan = profile?.let { p -> base.settings.selectedScheme?.let { BacEngine.schemePlan(it, p, base.settings.foodLevel) } }
+        val sessionProfile = profile?.let { p ->
+            session?.let {
+                p.copy(
+                    drinkName = it.drinkName,
+                    drinkAbv = it.drinkAbv,
+                    caloriesPer30Ml = it.caloriesPer30Ml
+                )
+            } ?: p
+        }
+        val currentBac = BacEngine.bacAt(full.drinks, sessionProfile, nowMillis)
         val elapsed = session?.let { nowMillis - it.startedAtMillis } ?: 0L
         _state.update { old ->
             old.copy(
@@ -284,11 +304,11 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
                 currentBac = currentBac,
                 soberHours = BacEngine.soberHours(currentBac),
                 elapsedMillis = elapsed.coerceAtLeast(0L),
-                pacerState = pacer,
-                selectedPlan = plan,
-                actualCurve = BacEngine.actualCurve(full.drinks, profile, session, nowMillis),
+                pacerState = BacEngine.pacerState(sessionProfile, session, full.drinks, base.settings.selectedScheme, base.settings.foodLevel, nowMillis),
+                selectedPlan = sessionProfile?.let { p -> base.settings.selectedScheme?.let { BacEngine.schemePlan(it, p, base.settings.foodLevel) } },
+                actualCurve = BacEngine.actualCurve(full.drinks, sessionProfile, session, nowMillis),
                 targetCurve = BacEngine.targetCurve(base.settings.selectedScheme, base.settings.foodLevel),
-                projectionCurve = BacEngine.projectedCurve(full.drinks, profile, session, base.settings.selectedScheme, base.settings.foodLevel, nowMillis),
+                projectionCurve = BacEngine.projectedCurve(full.drinks, sessionProfile, session, base.settings.selectedScheme, base.settings.foodLevel, nowMillis),
                 nowMillis = nowMillis
             )
         }
@@ -344,5 +364,15 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
         val base: BaseState,
         val drinks: List<DrinkLog>,
         val meals: List<MealLog>
+    )
+}
+
+private fun DrukUiState.sessionProfile(): UserProfile? {
+    val base = profile ?: return null
+    val session = activeSession ?: return base
+    return base.copy(
+        drinkName = session.drinkName,
+        drinkAbv = session.drinkAbv,
+        caloriesPer30Ml = session.caloriesPer30Ml
     )
 }

@@ -96,6 +96,8 @@ import kotlin.math.abs
 private val BacFormat = DecimalFormat("0.000")
 private val OneDecimal = DecimalFormat("0.0")
 private val ClockFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+private val DayFormat = SimpleDateFormat("d MMM, h:mm a", Locale.getDefault())
+private val MonthFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
 private val Mono = FontFamily.Monospace
 private val Serif = FontFamily.Serif
 
@@ -301,18 +303,6 @@ private fun SetupScreen(state: DrukUiState, actions: DrukViewModel) {
                     actions.updateSetup { it.copy(heightCm = value) }
                 }
             }
-            SetupLabel("Your drink", Modifier.padding(top = 18.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MonkField("Drink name", state.setup.drinkName, Modifier.weight(1f)) { value ->
-                    actions.updateSetup { it.copy(drinkName = value) }
-                }
-                NumberField("ABV %", state.setup.drinkAbv, Modifier.weight(1f)) { value ->
-                    actions.updateSetup { it.copy(drinkAbv = value) }
-                }
-            }
-            NumberField("Calories per 30 ml", state.setup.caloriesPer30Ml) { value ->
-                actions.updateSetup { it.copy(caloriesPer30Ml = value) }
-            }
             AmberButton("Set up →", Modifier.padding(top = 12.dp), actions::saveProfile)
         }
     }
@@ -347,8 +337,8 @@ private fun MainScreen(
                 item { SessionCard(state, actions, requestNotificationPermission, spec) }
                 if (state.activeSession != null) {
                     item { LogButtons(state, actions, spec) }
+                    item { FoodSelector(state, actions, spec) }
                 }
-                item { FoodSelector(state, actions, spec) }
             }
             AppPage.Plan -> {
                 item { SchemeSelector(state, actions, spec) }
@@ -434,12 +424,24 @@ private fun SessionCard(
         if (state.activeSession == null) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(
-                    "Ready when you are.",
-                    color = skin.muted,
+                    "Set up this session",
+                    color = skin.accent,
                     fontFamily = Serif,
-                    fontStyle = FontStyle.Italic,
-                    fontSize = 15.sp
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
                 )
+                Text("Drink choice belongs to tonight, not your account.", color = skin.muted, fontFamily = Mono, fontSize = 11.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MonkField("Drink", state.sessionDraft.drinkName, Modifier.weight(1f)) { value ->
+                        actions.updateSessionDraft { it.copy(drinkName = value) }
+                    }
+                    NumberField("ABV %", state.sessionDraft.drinkAbv, Modifier.weight(1f)) { value ->
+                        actions.updateSessionDraft { it.copy(drinkAbv = value) }
+                    }
+                }
+                NumberField("Calories per 30 ml", state.sessionDraft.caloriesPer30Ml) { value ->
+                    actions.updateSessionDraft { it.copy(caloriesPer30Ml = value) }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Pacing alerts", color = skin.muted, fontFamily = Mono, fontSize = 12.sp, modifier = Modifier.weight(1f))
                     Switch(
@@ -451,7 +453,7 @@ private fun SessionCard(
                         colors = SwitchDefaults.colors(checkedThumbColor = skin.accent, checkedTrackColor = skin.accentMuted)
                     )
                 }
-                AmberButton("⋄ First drink now") {
+                AmberButton("Start session") {
                     requestNotificationPermission()
                     actions.startSession()
                 }
@@ -492,6 +494,12 @@ private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel, spe
             Meta("Calories", "${completedDrinks.sumOf { it.calories }.toInt()} kcal", Modifier.weight(1f))
             Meta("Sober in", if (state.soberHours <= 0.05) "Now ✓" else "${OneDecimal.format(state.soberHours)}h", Modifier.weight(1f))
         }
+        Text(
+            "${state.activeSession?.drinkName.orEmpty()} · ${OneDecimal.format(state.activeSession?.drinkAbv ?: 0.0)}% ABV",
+            color = skin.muted,
+            fontFamily = Mono,
+            fontSize = 11.sp
+        )
         state.activeDrink?.let {
             Text(
                 "Current drink running · ${formatDuration(state.nowMillis - it.startedAtMillis)}",
@@ -611,7 +619,7 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignS
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("Start a drink", color = skin.accent, fontFamily = Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text(state.profile?.drinkName.orEmpty(), color = skin.text, fontFamily = Mono, fontSize = 13.sp, modifier = Modifier.background(skin.surface3, CircleShape).padding(horizontal = 14.dp, vertical = 6.dp))
+                Text(state.activeSession?.drinkName.orEmpty(), color = skin.text, fontFamily = Mono, fontSize = 13.sp, modifier = Modifier.background(skin.surface3, CircleShape).padding(horizontal = 14.dp, vertical = 6.dp))
                 Text("Volume", color = skin.muted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(30.0 to "30 ml · chhota", 60.0 to "60 ml · large").forEach { (ml, label) ->
@@ -1018,7 +1026,7 @@ private fun TimelineRow(item: TimelineItem, state: DrukUiState, actions: DrukVie
             when (item) {
                 is TimelineItem.Drink -> {
                     Text(
-                        "${state.profile?.drinkName.orEmpty()} · ${item.value.volumeMl.toInt()}ml · ${OneDecimal.format(item.value.abv)}%ABV · ${item.value.foodLevel.emoji()}${(item.value.foodLevel.deficit * 100).toInt()}%↓",
+                        "${state.activeSession?.drinkName ?: "Drink"} · ${item.value.volumeMl.toInt()}ml · ${OneDecimal.format(item.value.abv)}%ABV · ${item.value.foodLevel.emoji()}${(item.value.foodLevel.deficit * 100).toInt()}%↓",
                         color = skin.muted,
                         fontSize = 12.sp
                     )
@@ -1088,12 +1096,6 @@ private fun AccountPage(
     SectionLabel("Account", "(profile and session controls)", spec)
     DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = spec.cardPadding) {
         Text(state.profile?.name?.ifBlank { "You" } ?: "You", color = skin.text, fontFamily = Serif, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-        Text(
-            "${state.profile?.drinkName.orEmpty()} · ${OneDecimal.format(state.profile?.drinkAbv ?: 0.0)}% ABV",
-            color = skin.muted,
-            fontFamily = Mono,
-            fontSize = 12.sp
-        )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Meta("Weight", "${OneDecimal.format(state.profile?.weightKg ?: 0.0)}kg", Modifier.weight(1f))
             Meta("Height", "${OneDecimal.format(state.profile?.heightCm ?: 0.0)}cm", Modifier.weight(1f))
@@ -1118,15 +1120,43 @@ private fun AccountPage(
 @Composable
 private fun SessionHistoryViews(state: DrukUiState, spec: DesignSpec) {
     val skin = LocalSkin.current
+    var selectedSessionId by remember(state.completedSessions) { mutableStateOf(state.completedSessions.firstOrNull()?.id) }
+    val selectedSession = state.completedSessions.firstOrNull { it.id == selectedSessionId }
     SectionLabel("Previous sessions", "(calendar and sequence)", spec)
     DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = spec.cardPadding) {
-        CalendarPreview(state.completedSessions)
+        CalendarPreview(state.completedSessions, selectedSessionId) { selectedSessionId = it }
         if (state.completedSessions.isEmpty()) {
             Text("No completed sessions yet.", color = skin.muted, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 14.sp)
         } else {
+            selectedSession?.let { session ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(skin.surface2, RoundedCornerShape(10.dp))
+                        .border(1.dp, skin.border, RoundedCornerShape(10.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Selected session", color = skin.accentMuted, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.1.sp)
+                    Text(DayFormat.format(Date(session.startedAtMillis)), color = skin.text, fontFamily = Serif, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("${session.drinkName} · ${OneDecimal.format(session.drinkAbv)}% ABV · ${formatDuration((session.endedAtMillis ?: session.startedAtMillis) - session.startedAtMillis)}", color = skin.muted, fontFamily = Mono, fontSize = 11.sp)
+                }
+            }
             state.completedSessions.take(8).forEach { session ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(ClockFormat.format(Date(session.startedAtMillis)), color = skin.text, fontFamily = Mono, fontSize = 12.sp)
+                val selected = session.id == selectedSessionId
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (selected) skin.surface3 else Color.Transparent)
+                        .clickable { selectedSessionId = session.id }
+                        .padding(horizontal = 8.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(DayFormat.format(Date(session.startedAtMillis)), color = if (selected) skin.accent else skin.text, fontFamily = Mono, fontSize = 12.sp)
+                        Text(session.drinkName, color = skin.muted, fontFamily = Mono, fontSize = 10.sp)
+                    }
                     Text(formatDuration((session.endedAtMillis ?: session.startedAtMillis) - session.startedAtMillis), color = skin.muted, fontFamily = Mono, fontSize = 12.sp)
                 }
             }
@@ -1135,26 +1165,57 @@ private fun SessionHistoryViews(state: DrukUiState, spec: DesignSpec) {
 }
 
 @Composable
-private fun CalendarPreview(sessions: List<com.druk.app.domain.SessionLog>) {
+private fun CalendarPreview(
+    sessions: List<com.druk.app.domain.SessionLog>,
+    selectedSessionId: Long?,
+    onSelectSession: (Long) -> Unit
+) {
     val skin = LocalSkin.current
-    val activeDays = sessions.map {
-        java.util.Calendar.getInstance().apply { timeInMillis = it.startedAtMillis }.get(java.util.Calendar.DAY_OF_MONTH)
-    }.toSet()
+    val month = java.util.Calendar.getInstance()
+    val sessionByDay = sessions
+        .filter {
+            val cal = java.util.Calendar.getInstance().apply { timeInMillis = it.startedAtMillis }
+            cal.get(java.util.Calendar.YEAR) == month.get(java.util.Calendar.YEAR) &&
+                cal.get(java.util.Calendar.MONTH) == month.get(java.util.Calendar.MONTH)
+        }
+        .groupBy {
+            java.util.Calendar.getInstance().apply { timeInMillis = it.startedAtMillis }.get(java.util.Calendar.DAY_OF_MONTH)
+        }
+    val daysInMonth = month.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+    val first = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.DAY_OF_MONTH, 1)
+    }
+    val firstOffset = first.get(java.util.Calendar.DAY_OF_WEEK) - 1
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("This month", color = skin.accentMuted, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.2.sp)
-        repeat(5) { week ->
+        Text(MonthFormat.format(Date(month.timeInMillis)), color = skin.accentMuted, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.2.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("S", "M", "T", "W", "T", "F", "S").forEach {
+                Text(it, color = skin.muted, fontFamily = Mono, fontSize = 9.sp, modifier = Modifier.width(30.dp))
+            }
+        }
+        repeat(6) { week ->
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 repeat(7) { day ->
-                    val number = week * 7 + day + 1
+                    val number = week * 7 + day + 1 - firstOffset
+                    val session = sessionByDay[number]?.firstOrNull()
+                    val active = session != null
+                    val selected = session?.id == selectedSessionId
                     Box(
                         modifier = Modifier
                             .size(30.dp)
                             .clip(CircleShape)
-                            .background(if (number in activeDays) skin.accent.copy(alpha = 0.35f) else skin.surface2)
-                            .border(1.dp, if (number in activeDays) skin.accent else skin.border, CircleShape),
+                            .background(
+                                when {
+                                    selected -> skin.accent.copy(alpha = 0.55f)
+                                    active -> skin.accent.copy(alpha = 0.28f)
+                                    else -> skin.surface2
+                                }
+                            )
+                            .border(1.dp, if (active) skin.accent else skin.border, CircleShape)
+                            .clickable(enabled = active) { session?.let { onSelectSession(it.id) } },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(number.toString(), color = if (number in activeDays) skin.text else skin.muted, fontFamily = Mono, fontSize = 10.sp)
+                        Text(if (number in 1..daysInMonth) number.toString() else "", color = if (active) skin.text else skin.muted, fontFamily = Mono, fontSize = 10.sp)
                     }
                 }
             }

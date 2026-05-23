@@ -30,7 +30,7 @@ import kotlinx.coroutines.flow.Flow
         MealEntity::class,
         SettingsEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class DrukDatabase : RoomDatabase() {
@@ -46,7 +46,7 @@ abstract class DrukDatabase : RoomDatabase() {
                     context.applicationContext,
                     DrukDatabase::class.java,
                     "druk.db"
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
         }
 
@@ -55,6 +55,22 @@ abstract class DrukDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE drinks ADD COLUMN startedAtMillis INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE drinks ADD COLUMN endedAtMillis INTEGER")
                 db.execSQL("UPDATE drinks SET startedAtMillis = timestampMillis, endedAtMillis = timestampMillis WHERE startedAtMillis = 0")
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN drinkName TEXT NOT NULL DEFAULT 'House drink'")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN drinkAbv REAL NOT NULL DEFAULT 42.8")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN caloriesPer30Ml REAL NOT NULL DEFAULT 71.0")
+                db.execSQL(
+                    """
+                    UPDATE sessions
+                    SET drinkName = COALESCE((SELECT drinkName FROM profiles WHERE id = 1), 'House drink'),
+                        drinkAbv = COALESCE((SELECT drinkAbv FROM profiles WHERE id = 1), 42.8),
+                        caloriesPer30Ml = COALESCE((SELECT caloriesPer30Ml FROM profiles WHERE id = 1), 71.0)
+                    """.trimIndent()
+                )
             }
         }
     }
@@ -172,10 +188,20 @@ data class SettingsEntity(
 data class SessionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val startedAtMillis: Long,
-    val endedAtMillis: Long? = null
+    val endedAtMillis: Long? = null,
+    val drinkName: String = "House drink",
+    val drinkAbv: Double = 42.8,
+    val caloriesPer30Ml: Double = 71.0
 ) {
     fun toDomain(): SessionLog {
-        return SessionLog(id = id, startedAtMillis = startedAtMillis, endedAtMillis = endedAtMillis)
+        return SessionLog(
+            id = id,
+            startedAtMillis = startedAtMillis,
+            endedAtMillis = endedAtMillis,
+            drinkName = drinkName,
+            drinkAbv = drinkAbv,
+            caloriesPer30Ml = caloriesPer30Ml
+        )
     }
 }
 

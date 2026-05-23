@@ -69,7 +69,10 @@ data class MealLog(
 data class SessionLog(
     val id: Long = 0,
     val startedAtMillis: Long,
-    val endedAtMillis: Long? = null
+    val endedAtMillis: Long? = null,
+    val drinkName: String = "House drink",
+    val drinkAbv: Double = 42.8,
+    val caloriesPer30Ml: Double = 71.0
 )
 
 data class AppSettings(

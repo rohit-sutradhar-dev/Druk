@@ -38,9 +38,21 @@ class DrukRepository(context: Context) {
         dao.upsertSettings(settings.toEntity())
     }
 
-    suspend fun startSession(nowMillis: Long): Long {
+    suspend fun startSession(
+        nowMillis: Long,
+        drinkName: String = "House drink",
+        drinkAbv: Double = 42.8,
+        caloriesPer30Ml: Double = 71.0
+    ): Long {
         val active = dao.getActiveSession()
-        return active?.id ?: dao.insertSession(SessionEntity(startedAtMillis = nowMillis))
+        return active?.id ?: dao.insertSession(
+            SessionEntity(
+                startedAtMillis = nowMillis,
+                drinkName = drinkName,
+                drinkAbv = drinkAbv,
+                caloriesPer30Ml = caloriesPer30Ml
+            )
+        )
     }
 
     suspend fun endActiveSession(nowMillis: Long) {
@@ -54,7 +66,12 @@ class DrukRepository(context: Context) {
         abv: Double,
         nowMillis: Long
     ): Long {
-        val sessionId = startSession(nowMillis)
+        val sessionId = startSession(
+            nowMillis = nowMillis,
+            drinkName = profile.drinkName,
+            drinkAbv = profile.drinkAbv,
+            caloriesPer30Ml = profile.caloriesPer30Ml
+        )
         dao.getActiveDrink(sessionId)?.let { return it.id }
         val grams = BacEngine.alcoholGrams(volumeMl, abv)
         val calories = if (abv == profile.drinkAbv) {
