@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,10 +22,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,10 +41,12 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,7 +56,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -81,12 +90,99 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.abs
 
 private val BacFormat = DecimalFormat("0.000")
 private val OneDecimal = DecimalFormat("0.0")
 private val ClockFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 private val Mono = FontFamily.Monospace
 private val Serif = FontFamily.Serif
+
+private data class Skin(
+    val name: String,
+    val bg: Color,
+    val surface1: Color,
+    val surface2: Color,
+    val surface3: Color,
+    val border: Color,
+    val accent: Color,
+    val accentMuted: Color,
+    val text: Color,
+    val muted: Color,
+    val green: Color,
+    val orange: Color,
+    val red: Color,
+    val hero: List<Color>
+)
+
+private val MonkSkin = Skin(
+    name = "Monk",
+    bg = MonkBg,
+    surface1 = MonkSurface1,
+    surface2 = MonkSurface2,
+    surface3 = MonkSurface3,
+    border = MonkBorder,
+    accent = MonkAmber,
+    accentMuted = MonkAmberMuted,
+    text = MonkCream,
+    muted = MonkMuted,
+    green = MonkGreen,
+    orange = MonkOrange,
+    red = MonkRed,
+    hero = listOf(Color(0xFF2E1A0F), MonkSurface1)
+)
+
+private enum class ThemeChoice(val label: String, val skin: Skin) {
+    Monk("Monk", MonkSkin),
+    Neon(
+        "Neon",
+        Skin(
+            name = "Neon",
+            bg = Color(0xFF05080D),
+            surface1 = Color(0xFF08131A),
+            surface2 = Color(0xFF0E2026),
+            surface3 = Color(0xFF14313A),
+            border = Color(0xFF24515C),
+            accent = Color(0xFF39D7D4),
+            accentMuted = Color(0xFF4B8C97),
+            text = Color(0xFFE8FBF8),
+            muted = Color(0xFF84A7A6),
+            green = Color(0xFF79E27E),
+            orange = Color(0xFFFFB24A),
+            red = Color(0xFFFF5E5B),
+            hero = listOf(Color(0xFF112B31), Color(0xFF071015))
+        )
+    ),
+    Paper(
+        "Paper",
+        Skin(
+            name = "Paper",
+            bg = Color(0xFFF4E9D7),
+            surface1 = Color(0xFFFFF7EA),
+            surface2 = Color(0xFFF8E7CC),
+            surface3 = Color(0xFFEED1A3),
+            border = Color(0xFFC99C63),
+            accent = Color(0xFF9D5A13),
+            accentMuted = Color(0xFF8C7355),
+            text = Color(0xFF201713),
+            muted = Color(0xFF7D6651),
+            green = Color(0xFF357B45),
+            orange = Color(0xFFC56622),
+            red = Color(0xFFB13B2F),
+            hero = listOf(Color(0xFFFFF4DF), Color(0xFFF0D4A9))
+        )
+    )
+}
+
+private val LocalSkin = staticCompositionLocalOf { MonkSkin }
+
+private enum class AppPage(val label: String, val icon: String) {
+    Pace("Pace", "◇"),
+    Plan("Plan", "◎"),
+    Curve("Curve", "⌁"),
+    Account("Account", "☉")
+}
 
 private enum class DesignVariant(val label: String) {
     ClassicClean("Classic Clean"),
@@ -154,23 +250,41 @@ fun DrukApp(
     actions: DrukViewModel,
     requestNotificationPermission: () -> Unit
 ) {
-    var variant by remember { mutableStateOf(DesignVariant.ClassicClean) }
+    var variant by remember { mutableStateOf(DesignVariant.Compact) }
+    var theme by remember { mutableStateOf(ThemeChoice.Monk) }
+    var page by remember { mutableStateOf(AppPage.Pace) }
     val spec = variant.spec()
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MonkBg)
-    ) {
-        if (state.profile == null) {
-            SetupScreen(state, actions)
-        } else {
-            MainScreen(state, actions, requestNotificationPermission, variant, spec) { variant = it }
+    CompositionLocalProvider(LocalSkin provides theme.skin) {
+        val skin = LocalSkin.current
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(skin.bg)
+        ) {
+            if (state.profile == null) {
+                SetupScreen(state, actions)
+            } else {
+                MainScreen(
+                    state = state,
+                    actions = actions,
+                    requestNotificationPermission = requestNotificationPermission,
+                    variant = variant,
+                    theme = theme,
+                    page = page,
+                    spec = spec,
+                    onVariantChange = { variant = it },
+                    onThemeChange = { theme = it },
+                    onPageChange = { page = it }
+                )
+                BottomNav(page = page, onPageChange = { page = it })
+            }
         }
     }
 }
 
 @Composable
 private fun SetupScreen(state: DrukUiState, actions: DrukViewModel) {
+    val skin = LocalSkin.current
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -178,7 +292,7 @@ private fun SetupScreen(state: DrukUiState, actions: DrukViewModel) {
             .navigationBarsPadding()
             .background(
                 Brush.radialGradient(
-                    colors = listOf(Color(0xFF3D2010), MonkBg),
+                    colors = listOf(skin.surface3, skin.bg),
                     radius = 1100f
                 )
             )
@@ -190,7 +304,7 @@ private fun SetupScreen(state: DrukUiState, actions: DrukViewModel) {
             Text("🥃", fontSize = 42.sp)
             Text(
                 "Monk Mode",
-                color = MonkAmber,
+                color = skin.accent,
                 fontFamily = Serif,
                 fontSize = 38.sp,
                 fontWeight = FontWeight.Light,
@@ -198,7 +312,7 @@ private fun SetupScreen(state: DrukUiState, actions: DrukViewModel) {
             )
             Text(
                 "Widmark · Seidl 2000 · Personal BAC planner",
-                color = MonkMuted,
+                color = skin.muted,
                 fontFamily = Mono,
                 fontSize = 11.sp,
                 letterSpacing = 0.8.sp,
@@ -247,69 +361,124 @@ private fun MainScreen(
     actions: DrukViewModel,
     requestNotificationPermission: () -> Unit,
     variant: DesignVariant,
+    theme: ThemeChoice,
+    page: AppPage,
     spec: DesignSpec,
-    onVariantChange: (DesignVariant) -> Unit
+    onVariantChange: (DesignVariant) -> Unit,
+    onThemeChange: (ThemeChoice) -> Unit,
+    onPageChange: (AppPage) -> Unit
 ) {
     val timeline = (state.drinks.map { TimelineItem.Drink(it) } + state.meals.map { TimelineItem.Meal(it) })
         .sortedByDescending { it.timestampMillis }
+    val skin = LocalSkin.current
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            .background(MonkBg),
-        contentPadding = PaddingValues(bottom = 24.dp),
+            .background(skin.bg),
+        contentPadding = PaddingValues(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { HeaderBar(state, spec) }
-        item { DesignSwitcher(variant, onVariantChange, spec) }
-        item { SessionCard(state, actions, requestNotificationPermission, spec) }
-        if (state.activeSession != null) {
-            item { LogButtons(state, actions, spec) }
+        item { AppChrome(variant, theme, spec, onVariantChange, onThemeChange) }
+        when (page) {
+            AppPage.Pace -> {
+                item { SessionCard(state, actions, requestNotificationPermission, spec) }
+                if (state.activeSession != null) {
+                    item { LogButtons(state, actions, spec) }
+                }
+                item { FoodSelector(state, actions, spec) }
+            }
+            AppPage.Plan -> {
+                item { SchemeSelector(state, actions, spec) }
+                item { PlanGuide(state, spec) }
+                item { TimelineCard(timeline, actions, state, spec) }
+            }
+            AppPage.Curve -> {
+                item { BacCurve(state.actualCurve, state.targetCurve, state.settings.selectedScheme, spec) }
+                item { SchemeSelector(state, actions, spec) }
+            }
+            AppPage.Account -> {
+                item { AccountPage(state, actions, spec) }
+            }
         }
-        item { FoodSelector(state, actions, spec) }
-        item { SchemeSelector(state, actions, spec) }
-        item { PlanGuide(state, spec) }
-        item { BacCurve(state.actualCurve, state.targetCurve, state.settings.selectedScheme, spec) }
-        item { TimelineCard(timeline, actions, state, spec) }
-        item { Footer(state, actions, spec) }
     }
 }
 
 @Composable
-private fun HeaderBar(state: DrukUiState, spec: DesignSpec) {
+private fun AppChrome(
+    variant: DesignVariant,
+    theme: ThemeChoice,
+    spec: DesignSpec,
+    onVariantChange: (DesignVariant) -> Unit,
+    onThemeChange: (ThemeChoice) -> Unit
+) {
+    Column(
+        modifier = Modifier.padding(start = spec.pagePadding.dp, end = spec.pagePadding.dp, top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            DesignVariant.entries.forEach { option ->
+                GhostButton(option.label, selected = variant == option) { onVariantChange(option) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            ThemeChoice.entries.forEach { option ->
+                ThemeSwatch(option, selected = theme == option) { onThemeChange(option) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.BottomNav(page: AppPage, onPageChange: (AppPage) -> Unit) {
+    val skin = LocalSkin.current
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = spec.pagePadding.dp, end = spec.pagePadding.dp, top = 8.dp, bottom = 0.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .align(Alignment.BottomCenter)
+            .navigationBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(skin.surface2.copy(alpha = 0.98f))
+            .border(1.dp, skin.border, RoundedCornerShape(18.dp))
+            .padding(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(state.profile?.name?.ifBlank { "Monk Mode" } ?: "Monk Mode", color = MonkCream, fontFamily = Mono, fontSize = 13.sp)
-        GhostButton("Edit profile") { }
+        AppPage.entries.forEach { option ->
+            val selected = page == option
+            Column(
+                modifier = Modifier
+                    .width(78.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (selected) skin.surface3 else Color.Transparent)
+                    .clickable { onPageChange(option) }
+                    .padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(option.icon, color = if (selected) skin.accent else skin.muted, fontSize = 18.sp)
+                Text(option.label, color = if (selected) skin.text else skin.muted, fontFamily = Mono, fontSize = 9.sp)
+            }
+        }
     }
 }
 
 @Composable
-private fun DesignSwitcher(
-    variant: DesignVariant,
-    onVariantChange: (DesignVariant) -> Unit,
-    spec: DesignSpec
-) {
+private fun ThemeSwatch(option: ThemeChoice, selected: Boolean, onClick: () -> Unit) {
+    val skin = option.skin
     Row(
         modifier = Modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = spec.pagePadding.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) skin.surface3 else Color.Transparent)
+            .border(1.dp, if (selected) skin.accent else skin.border, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        DesignVariant.entries.forEach { option ->
-            GhostButton(
-                text = option.label,
-                selected = variant == option,
-                onClick = { onVariantChange(option) }
-            )
-        }
+        Box(Modifier.size(14.dp).clip(CircleShape).background(skin.accent))
+        Text(option.label, color = LocalSkin.current.text, fontFamily = Mono, fontSize = 11.sp)
     }
 }
 
@@ -320,9 +489,10 @@ private fun SessionCard(
     requestNotificationPermission: () -> Unit,
     spec: DesignSpec
 ) {
+    val skin = LocalSkin.current
     DarkCard(
         modifier = Modifier.padding(horizontal = spec.pagePadding.dp),
-        background = Brush.linearGradient(listOf(Color(0xFF2E1A0F), MonkSurface1)),
+        background = Brush.linearGradient(skin.hero),
         radius = spec.cardRadius,
         padding = spec.cardPadding
     ) {
@@ -330,20 +500,20 @@ private fun SessionCard(
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(
                     "Ready when you are.",
-                    color = MonkMuted,
+                    color = skin.muted,
                     fontFamily = Serif,
                     fontStyle = FontStyle.Italic,
                     fontSize = 15.sp
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Pacing alerts", color = MonkMuted, fontFamily = Mono, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Text("Pacing alerts", color = skin.muted, fontFamily = Mono, fontSize = 12.sp, modifier = Modifier.weight(1f))
                     Switch(
                         checked = state.settings.notificationsEnabled,
                         onCheckedChange = {
                             actions.setNotificationsEnabled(it)
                             if (it) requestNotificationPermission()
                         },
-                        colors = SwitchDefaults.colors(checkedThumbColor = MonkAmber, checkedTrackColor = MonkAmberMuted)
+                        colors = SwitchDefaults.colors(checkedThumbColor = skin.accent, checkedTrackColor = skin.accentMuted)
                     )
                 }
                 AmberButton("⋄ First drink now") {
@@ -360,6 +530,7 @@ private fun SessionCard(
 @Composable
 private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
     val status = bacStatus(state.currentBac)
+    val skin = LocalSkin.current
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Column(
             modifier = Modifier
@@ -376,7 +547,7 @@ private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel, spe
                 fontWeight = FontWeight.Bold,
                 lineHeight = spec.bacLineHeight.sp
             )
-            Text("${OneDecimal.format(state.currentBac * 10)}‰", color = MonkMuted, fontFamily = Mono, fontSize = 14.sp)
+            Text("${OneDecimal.format(state.currentBac * 10)}‰", color = skin.muted, fontFamily = Mono, fontSize = 14.sp)
             Text(status.label, color = status.color, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 16.sp)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -392,12 +563,13 @@ private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel, spe
 
 @Composable
 private fun PaceCard(state: DrukUiState, spec: DesignSpec) {
+    val skin = LocalSkin.current
     val kind = state.pacerState.kind
     val color = when (kind) {
-        PacerKind.DrinkNow -> MonkGreen
-        PacerKind.Wait -> MonkAmber
-        PacerKind.Stop -> MonkRed
-        else -> MonkMuted
+        PacerKind.DrinkNow -> skin.green
+        PacerKind.Wait -> skin.accent
+        PacerKind.Stop -> skin.red
+        else -> skin.muted
     }
     val label = when (kind) {
         PacerKind.DrinkNow -> "due"
@@ -408,7 +580,7 @@ private fun PaceCard(state: DrukUiState, spec: DesignSpec) {
         modifier = Modifier
             .fillMaxWidth()
             .background(Color.Black.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
-            .border(1.dp, MonkBorder, RoundedCornerShape(14.dp))
+            .border(1.dp, skin.border, RoundedCornerShape(14.dp))
             .padding(if (spec.cardPadding < 16) 12.dp else 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -416,14 +588,14 @@ private fun PaceCard(state: DrukUiState, spec: DesignSpec) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 if (state.settings.selectedScheme == null) "Pacer" else "Next peg",
-                color = MonkAmberMuted,
+                color = skin.accentMuted,
                 fontFamily = Mono,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp
             )
             Text(state.pacerState.title, color = color, fontFamily = Serif, fontSize = spec.paceTitleSize.sp, fontWeight = FontWeight.Bold, lineHeight = (spec.paceTitleSize + 2).sp)
-            Text(state.pacerState.detail, color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, lineHeight = 16.sp)
+            Text(state.pacerState.detail, color = skin.muted, fontFamily = Mono, fontSize = 11.sp, lineHeight = 16.sp)
         }
         PaceRing(
             percent = state.pacerState.progressPercent,
@@ -441,17 +613,18 @@ private fun PaceCard(state: DrukUiState, spec: DesignSpec) {
 
 @Composable
 private fun PaceRing(percent: Int, color: Color, sizeDp: Int, text: String, label: String) {
+    val skin = LocalSkin.current
     val outer = sizeDp + 8
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(outer.dp)) {
         Canvas(modifier = Modifier.size(sizeDp.dp)) {
             drawCircle(Color.White.copy(alpha = 0.08f))
             drawArc(color, -90f, 360f * percent.coerceIn(0, 100) / 100f, useCenter = true)
-            drawCircle(MonkSurface1, radius = size.minDimension / 2f - 7.dp.toPx())
-            drawCircle(MonkBorder.copy(alpha = 0.75f), radius = size.minDimension / 2f - 7.dp.toPx(), style = Stroke(1.dp.toPx()))
+            drawCircle(skin.surface1, radius = size.minDimension / 2f - 7.dp.toPx())
+            drawCircle(skin.border.copy(alpha = 0.75f), radius = size.minDimension / 2f - 7.dp.toPx(), style = Stroke(1.dp.toPx()))
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text, color = MonkCream, fontFamily = Mono, fontSize = 10.sp, lineHeight = 11.sp)
-            Text(label, color = MonkMuted, fontFamily = Mono, fontSize = 8.sp, lineHeight = 9.sp)
+            Text(text, color = skin.text, fontFamily = Mono, fontSize = 10.sp, lineHeight = 11.sp)
+            Text(label, color = skin.muted, fontFamily = Mono, fontSize = 8.sp, lineHeight = 9.sp)
         }
     }
 }
@@ -619,21 +792,37 @@ private fun FoodSelector(state: DrukUiState, actions: DrukViewModel, spec: Desig
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SchemeSelector(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
     SectionLabel("Drinking schemes", "(tap to show plan)", spec)
-    Row(
-        modifier = Modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = spec.pagePadding.dp),
-        horizontalArrangement = Arrangement.spacedBy(11.dp)
-    ) {
-        TargetScheme.entries.forEach { scheme ->
+    val schemes = TargetScheme.entries
+    val selectedIndex = schemes.indexOf(state.settings.selectedScheme).coerceAtLeast(0)
+    val pagerState = rememberPagerState(initialPage = selectedIndex) { schemes.size }
+    HorizontalPager(
+        state = pagerState,
+        contentPadding = PaddingValues(horizontal = spec.pagePadding.dp),
+        pageSpacing = 10.dp
+    ) { page ->
+        val scheme = schemes[page]
             val selected = state.settings.selectedScheme == scheme
             val plan = state.profile?.let { BacEngine.schemePlan(scheme, it, state.settings.foodLevel) }
             SchemeCard(scheme, plan, selected, spec) {
                 actions.selectScheme(if (selected) null else scheme)
             }
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        schemes.forEachIndexed { index, scheme ->
+            Box(
+                modifier = Modifier
+                    .padding(3.dp)
+                    .size(if (index == pagerState.currentPage) 9.dp else 6.dp)
+                    .clip(CircleShape)
+                    .background(if (index == pagerState.currentPage) scheme.color() else LocalSkin.current.border)
+            )
         }
     }
 }
@@ -739,16 +928,50 @@ private fun PlanGuide(state: DrukUiState, spec: DesignSpec) {
 
 @Composable
 private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: TargetScheme?, spec: DesignSpec) {
+    var selectedPoint by remember(actual) { mutableStateOf<BacPoint?>(actual.lastOrNull()) }
+    val skin = LocalSkin.current
     SectionLabel("BAC curve", spec = spec)
-    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = MonkSurface1, radius = spec.cardRadius, padding = spec.cardPadding) {
+    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = spec.cardPadding) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CurveChip("▶ Actual", skin.accent)
+            CurveChip("${scheme?.emoji() ?: "◇"} ${scheme?.label ?: "Plan"}", scheme?.color() ?: skin.green)
+            CurveChip("Zones", skin.muted)
+        }
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(180.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(skin.surface2.copy(alpha = 0.92f), skin.surface1)
+                    )
+                )
+                .pointerInput(actual, target) {
+                    detectTapGestures { offset ->
+                        val points = actual.ifEmpty { target }
+                        if (points.isNotEmpty()) {
+                            val maxX = max((actual + target).maxOfOrNull { it.hours } ?: 10.0, 10.0)
+                            selectedPoint = points.minByOrNull { point ->
+                                val x = (point.hours / maxX).toFloat() * size.width
+                                abs(x - offset.x)
+                            }
+                        }
+                    }
+                }
         ) {
             val maxX = max((actual + target).maxOfOrNull { it.hours } ?: 10.0, 10.0)
             val maxY = max((actual + target).maxOfOrNull { it.bac } ?: 0.12, 0.12)
-            val grid = MonkBorder.copy(alpha = 0.40f)
+            val grid = skin.border.copy(alpha = 0.34f)
+            val zoneColors = listOf(MonkGreen, MonkAmber, MonkOrange, MonkRed)
+            listOf(0.03, 0.06, 0.09, 0.12).forEachIndexed { index, bac ->
+                val y = size.height - (bac / maxY).toFloat() * size.height
+                drawRect(
+                    color = zoneColors.getOrElse(index) { skin.red }.copy(alpha = 0.04f),
+                    topLeft = Offset(0f, y),
+                    size = androidx.compose.ui.geometry.Size(size.width, size.height - y)
+                )
+            }
             repeat(5) { i ->
                 val y = size.height * i / 4f
                 drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
@@ -771,9 +994,32 @@ private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: Tar
                 drawLine(it.color().copy(alpha = 0.34f), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
             }
             drawPathLine(target, (scheme?.color() ?: MonkAmber).copy(alpha = 0.85f), 3f)
-            drawPathLine(actual, MonkAmber, 5f)
+            drawPathLine(actual, skin.accent, 5f)
+            selectedPoint?.let { point ->
+                val p = map(point)
+                drawLine(skin.text.copy(alpha = 0.40f), Offset(p.x, 0f), Offset(p.x, size.height), strokeWidth = 1.5f)
+                drawCircle(skin.accent, radius = 8.dp.toPx(), center = p)
+                drawCircle(skin.bg, radius = 4.dp.toPx(), center = p)
+            }
         }
-        Text("Actual BAC · ${scheme?.label ?: "target plan"} · horizontal target bands", color = MonkMuted, fontFamily = Mono, fontSize = 10.sp)
+        Text(
+            selectedPoint?.let { "Selected · ${OneDecimal.format(it.hours)}h · ${BacFormat.format(it.bac)}%" }
+                ?: "Tap the curve to inspect a point.",
+            color = skin.muted,
+            fontFamily = Mono,
+            fontSize = 10.sp
+        )
+    }
+}
+
+@Composable
+private fun CurveChip(label: String, color: Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+        Text(label, color = LocalSkin.current.muted, fontFamily = Mono, fontSize = 10.sp)
     }
 }
 
@@ -860,6 +1106,38 @@ private fun Footer(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec)
 }
 
 @Composable
+private fun AccountPage(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
+    val skin = LocalSkin.current
+    SectionLabel("Account", "(profile and session controls)", spec)
+    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = spec.cardPadding) {
+        Text(state.profile?.name?.ifBlank { "You" } ?: "You", color = skin.text, fontFamily = Serif, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "${state.profile?.drinkName.orEmpty()} · ${OneDecimal.format(state.profile?.drinkAbv ?: 0.0)}% ABV",
+            color = skin.muted,
+            fontFamily = Mono,
+            fontSize = 12.sp
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Meta("Weight", "${OneDecimal.format(state.profile?.weightKg ?: 0.0)}kg", Modifier.weight(1f))
+            Meta("Height", "${OneDecimal.format(state.profile?.heightCm ?: 0.0)}cm", Modifier.weight(1f))
+            Meta("Seidl r", DecimalFormat("0.000").format(state.profile?.r ?: 0.0), Modifier.weight(1f))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Pacing alerts", color = skin.muted, fontFamily = Mono, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Switch(
+                checked = state.settings.notificationsEnabled,
+                onCheckedChange = actions::setNotificationsEnabled,
+                colors = SwitchDefaults.colors(checkedThumbColor = skin.accent, checkedTrackColor = skin.accentMuted)
+            )
+        }
+        if (state.activeSession != null) {
+            GhostButton("End current session", Modifier.fillMaxWidth()) { actions.endSession() }
+        }
+    }
+    Footer(state, actions, spec)
+}
+
+@Composable
 private fun DarkCard(
     modifier: Modifier = Modifier,
     background: Brush? = null,
@@ -868,26 +1146,28 @@ private fun DarkCard(
     padding: Int = 16,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val skin = LocalSkin.current
     val base = modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(radius.dp))
         .then(if (background != null) Modifier.background(background) else Modifier.background(backgroundColor))
-        .border(1.dp, MonkBorder, RoundedCornerShape(radius.dp))
+        .border(1.dp, skin.border, RoundedCornerShape(radius.dp))
         .padding(padding.dp)
     Column(modifier = base, verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
 }
 
 @Composable
 private fun SectionLabel(title: String, small: String? = null, spec: DesignSpec) {
+    val skin = LocalSkin.current
     Text(
         buildAnnotatedString {
             append(title.uppercase())
             if (small != null) {
                 append(" ")
-                withStyle(SpanStyle(color = MonkMuted, fontSize = 10.sp, letterSpacing = 0.sp)) { append(small) }
+                withStyle(SpanStyle(color = skin.muted, fontSize = 10.sp, letterSpacing = 0.sp)) { append(small) }
             }
         },
-        color = MonkAmberMuted,
+        color = skin.accentMuted,
         fontFamily = Mono,
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
@@ -898,7 +1178,8 @@ private fun SectionLabel(title: String, small: String? = null, spec: DesignSpec)
 
 @Composable
 private fun SetupLabel(text: String, modifier: Modifier = Modifier) {
-    Text(text.uppercase(), color = MonkAmberMuted, fontFamily = Mono, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, modifier = modifier.fillMaxWidth().padding(bottom = 8.dp))
+    val skin = LocalSkin.current
+    Text(text.uppercase(), color = skin.accentMuted, fontFamily = Mono, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp, modifier = modifier.fillMaxWidth().padding(bottom = 8.dp))
 }
 
 @Composable
@@ -907,7 +1188,8 @@ private fun MonkField(label: String, value: String, modifier: Modifier = Modifie
         value = value,
         onValueChange = onChange,
         label = { Text(label, fontFamily = Mono) },
-        modifier = modifier.fillMaxWidth().padding(bottom = 10.dp),
+        textStyle = TextStyle(fontFamily = Mono, fontSize = 16.sp, lineHeight = 18.sp),
+        modifier = modifier.fillMaxWidth().height(64.dp).padding(bottom = 8.dp),
         singleLine = true,
         colors = fieldColors()
     )
@@ -919,8 +1201,9 @@ private fun NumberField(label: String, value: String, modifier: Modifier = Modif
         value = value,
         onValueChange = { input -> onChange(input.filter { it.isDigit() || it == '.' }.take(6)) },
         label = { Text(label, fontFamily = Mono) },
+        textStyle = TextStyle(fontFamily = Mono, fontSize = 16.sp, lineHeight = 18.sp),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        modifier = modifier.fillMaxWidth().padding(bottom = 10.dp),
+        modifier = modifier.fillMaxWidth().height(64.dp).padding(bottom = 8.dp),
         singleLine = true,
         colors = fieldColors()
     )
@@ -928,24 +1211,25 @@ private fun NumberField(label: String, value: String, modifier: Modifier = Modif
 
 @Composable
 private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = MonkCream,
-    unfocusedTextColor = MonkCream,
-    focusedContainerColor = MonkSurface2,
-    unfocusedContainerColor = MonkSurface2,
-    focusedBorderColor = MonkAmber,
-    unfocusedBorderColor = MonkBorder,
-    focusedLabelColor = MonkAmber,
-    unfocusedLabelColor = MonkMuted,
-    cursorColor = MonkAmber
+    focusedTextColor = LocalSkin.current.text,
+    unfocusedTextColor = LocalSkin.current.text,
+    focusedContainerColor = LocalSkin.current.surface2,
+    unfocusedContainerColor = LocalSkin.current.surface2,
+    focusedBorderColor = LocalSkin.current.accent,
+    unfocusedBorderColor = LocalSkin.current.border,
+    focusedLabelColor = LocalSkin.current.accent,
+    unfocusedLabelColor = LocalSkin.current.muted,
+    cursorColor = LocalSkin.current.accent
 )
 
 @Composable
 private fun AmberButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val skin = LocalSkin.current
     Button(
         onClick = onClick,
         modifier = modifier.fillMaxWidth().height(52.dp),
         shape = RoundedCornerShape(10.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = MonkAmber, contentColor = MonkBg)
+        colors = ButtonDefaults.buttonColors(containerColor = skin.accent, contentColor = skin.bg)
     ) {
         Text(text, fontFamily = Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold)
     }
@@ -953,12 +1237,13 @@ private fun AmberButton(text: String, modifier: Modifier = Modifier, onClick: ()
 
 @Composable
 private fun ActionButton(text: String, bg: Color, fg: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val skin = LocalSkin.current
     Box(
         modifier = modifier
             .height(46.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
-            .border(1.dp, if (fg == MonkGreen) Color(0xFF3A6E3C) else MonkBorder, RoundedCornerShape(10.dp))
+            .border(1.dp, if (fg == skin.green) skin.green.copy(alpha = 0.72f) else skin.border, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -974,59 +1259,63 @@ private fun GhostButton(
     enabled: Boolean = true,
     onClick: () -> Unit
 ) {
+    val skin = LocalSkin.current
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) MonkSurface3 else Color.Transparent)
-            .border(1.dp, if (selected) MonkAmber else MonkBorder, RoundedCornerShape(8.dp))
+            .background(if (selected) skin.surface3 else Color.Transparent)
+            .border(1.dp, if (selected) skin.accent else skin.border, RoundedCornerShape(8.dp))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, color = if (selected) MonkAmber else MonkMuted, fontFamily = Mono, fontSize = 11.sp)
+        Text(text, color = if (selected) skin.accent else skin.muted, fontFamily = Mono, fontSize = 11.sp)
     }
 }
 
 @Composable
 private fun SelectPill(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val skin = LocalSkin.current
     Box(
         modifier = modifier
             .height(48.dp)
             .clip(RoundedCornerShape(9.dp))
-            .background(if (selected) MonkSurface3 else MonkSurface2)
-            .border(1.5.dp, if (selected) MonkAmber else MonkBorder, RoundedCornerShape(9.dp))
+            .background(if (selected) skin.surface3 else skin.surface2)
+            .border(1.5.dp, if (selected) skin.accent else skin.border, RoundedCornerShape(9.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, color = if (selected) MonkAmber else MonkCream, fontFamily = Mono, fontWeight = FontWeight.Bold)
+        Text(text, color = if (selected) skin.accent else skin.text, fontFamily = Mono, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 private fun FoodMini(food: FoodLevel, selected: Boolean, modifier: Modifier = Modifier, green: Boolean = false, onClick: () -> Unit) {
-    val accent = if (green) MonkGreen else MonkAmber
+    val skin = LocalSkin.current
+    val accent = if (green) skin.green else skin.accent
     Column(
         modifier = modifier
             .height(70.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) MonkSurface3 else MonkSurface2)
-            .border(1.5.dp, if (selected) accent else MonkBorder, RoundedCornerShape(10.dp))
+            .background(if (selected) skin.surface3 else skin.surface2)
+            .border(1.5.dp, if (selected) accent else skin.border, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .padding(vertical = 7.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(food.emoji(), fontSize = 17.sp)
-        Text(food.label, color = if (selected) accent else MonkMuted, fontFamily = Mono, fontSize = 9.sp, lineHeight = 11.sp)
-        Text("${(food.deficit * 100).toInt()}% off", color = MonkMuted, fontFamily = Mono, fontSize = 8.sp, lineHeight = 10.sp)
+        Text(food.label, color = if (selected) accent else skin.muted, fontFamily = Mono, fontSize = 9.sp, lineHeight = 11.sp)
+        Text("${(food.deficit * 100).toInt()}% off", color = skin.muted, fontFamily = Mono, fontSize = 8.sp, lineHeight = 10.sp)
     }
 }
 
 @Composable
 private fun Meta(label: String, value: String, modifier: Modifier = Modifier) {
+    val skin = LocalSkin.current
     Column(modifier = modifier) {
-        Text(label.uppercase(), color = MonkMuted, fontFamily = Mono, fontSize = 9.sp, letterSpacing = 0.8.sp)
-        Text(value, color = MonkCream, fontFamily = Mono, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+        Text(label.uppercase(), color = skin.muted, fontFamily = Mono, fontSize = 9.sp, letterSpacing = 0.8.sp)
+        Text(value, color = skin.text, fontFamily = Mono, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
