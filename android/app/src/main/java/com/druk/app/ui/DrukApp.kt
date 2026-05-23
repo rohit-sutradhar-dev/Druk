@@ -184,12 +184,6 @@ private enum class AppPage(val label: String, val icon: String) {
     Account("Account", "☉")
 }
 
-private enum class DesignVariant(val label: String) {
-    ClassicClean("Classic Clean"),
-    Focus("Focus"),
-    Compact("Compact")
-}
-
 private data class DesignSpec(
     val pagePadding: Int,
     val cardPadding: Int,
@@ -203,46 +197,18 @@ private data class DesignSpec(
     val showFullGuide: Boolean
 )
 
-private fun DesignVariant.spec(): DesignSpec {
-    return when (this) {
-        DesignVariant.ClassicClean -> DesignSpec(
-            pagePadding = 16,
-            cardPadding = 16,
-            cardRadius = 16,
-            bacSize = 48,
-            bacLineHeight = 50,
-            paceTitleSize = 20,
-            paceRingSize = 64,
-            schemeWidth = 205,
-            showFoodDetail = true,
-            showFullGuide = true
-        )
-        DesignVariant.Focus -> DesignSpec(
-            pagePadding = 16,
-            cardPadding = 16,
-            cardRadius = 18,
-            bacSize = 56,
-            bacLineHeight = 58,
-            paceTitleSize = 22,
-            paceRingSize = 72,
-            schemeWidth = 190,
-            showFoodDetail = false,
-            showFullGuide = false
-        )
-        DesignVariant.Compact -> DesignSpec(
-            pagePadding = 14,
-            cardPadding = 14,
-            cardRadius = 12,
-            bacSize = 40,
-            bacLineHeight = 42,
-            paceTitleSize = 18,
-            paceRingSize = 56,
-            schemeWidth = 178,
-            showFoodDetail = false,
-            showFullGuide = false
-        )
-    }
-}
+private fun compactSpec() = DesignSpec(
+    pagePadding = 14,
+    cardPadding = 14,
+    cardRadius = 12,
+    bacSize = 40,
+    bacLineHeight = 42,
+    paceTitleSize = 18,
+    paceRingSize = 56,
+    schemeWidth = 178,
+    showFoodDetail = false,
+    showFullGuide = false
+)
 
 @Composable
 fun DrukApp(
@@ -250,10 +216,9 @@ fun DrukApp(
     actions: DrukViewModel,
     requestNotificationPermission: () -> Unit
 ) {
-    var variant by remember { mutableStateOf(DesignVariant.Compact) }
     var theme by remember { mutableStateOf(ThemeChoice.Monk) }
     var page by remember { mutableStateOf(AppPage.Pace) }
-    val spec = variant.spec()
+    val spec = compactSpec()
     CompositionLocalProvider(LocalSkin provides theme.skin) {
         val skin = LocalSkin.current
         Box(
@@ -268,11 +233,9 @@ fun DrukApp(
                     state = state,
                     actions = actions,
                     requestNotificationPermission = requestNotificationPermission,
-                    variant = variant,
                     theme = theme,
                     page = page,
                     spec = spec,
-                    onVariantChange = { variant = it },
                     onThemeChange = { theme = it },
                     onPageChange = { page = it }
                 )
@@ -360,11 +323,9 @@ private fun MainScreen(
     state: DrukUiState,
     actions: DrukViewModel,
     requestNotificationPermission: () -> Unit,
-    variant: DesignVariant,
     theme: ThemeChoice,
     page: AppPage,
     spec: DesignSpec,
-    onVariantChange: (DesignVariant) -> Unit,
     onThemeChange: (ThemeChoice) -> Unit,
     onPageChange: (AppPage) -> Unit
 ) {
@@ -381,7 +342,6 @@ private fun MainScreen(
         contentPadding = PaddingValues(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { AppChrome(variant, theme, spec, onVariantChange, onThemeChange) }
         when (page) {
             AppPage.Pace -> {
                 item { SessionCard(state, actions, requestNotificationPermission, spec) }
@@ -396,36 +356,11 @@ private fun MainScreen(
                 item { TimelineCard(timeline, actions, state, spec) }
             }
             AppPage.Curve -> {
-                item { BacCurve(state.actualCurve, state.targetCurve, state.settings.selectedScheme, spec) }
+                item { BacCurve(state.actualCurve, state.targetCurve, state.projectionCurve, state.settings.selectedScheme, spec) }
                 item { SchemeSelector(state, actions, spec) }
             }
             AppPage.Account -> {
-                item { AccountPage(state, actions, spec) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AppChrome(
-    variant: DesignVariant,
-    theme: ThemeChoice,
-    spec: DesignSpec,
-    onVariantChange: (DesignVariant) -> Unit,
-    onThemeChange: (ThemeChoice) -> Unit
-) {
-    Column(
-        modifier = Modifier.padding(start = spec.pagePadding.dp, end = spec.pagePadding.dp, top = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-            DesignVariant.entries.forEach { option ->
-                GhostButton(option.label, selected = variant == option) { onVariantChange(option) }
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-            ThemeChoice.entries.forEach { option ->
-                ThemeSwatch(option, selected = theme == option) { onThemeChange(option) }
+                item { AccountPage(state, actions, theme, onThemeChange, spec) }
             }
         }
     }
@@ -531,6 +466,7 @@ private fun SessionCard(
 private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
     val status = bacStatus(state.currentBac)
     val skin = LocalSkin.current
+    val completedDrinks = state.drinks.filter { it.endedAtMillis != null }
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Column(
             modifier = Modifier
@@ -552,9 +488,17 @@ private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel, spe
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Meta("Session", formatDuration(state.elapsedMillis), Modifier.weight(1f))
-            Meta("Drinks", state.drinks.size.toString(), Modifier.weight(1f))
-            Meta("Calories", "${state.drinks.sumOf { it.calories }.toInt()} kcal", Modifier.weight(1f))
+            Meta("Drinks", completedDrinks.size.toString(), Modifier.weight(1f))
+            Meta("Calories", "${completedDrinks.sumOf { it.calories }.toInt()} kcal", Modifier.weight(1f))
             Meta("Sober in", if (state.soberHours <= 0.05) "Now ✓" else "${OneDecimal.format(state.soberHours)}h", Modifier.weight(1f))
+        }
+        state.activeDrink?.let {
+            Text(
+                "Current drink running · ${formatDuration(state.nowMillis - it.startedAtMillis)}",
+                color = skin.accent,
+                fontFamily = Mono,
+                fontSize = 11.sp
+            )
         }
         PaceCard(state, spec)
         GhostButton("Undo last log", enabled = state.drinks.isNotEmpty() || state.meals.isNotEmpty(), onClick = actions::undoLatest)
@@ -634,20 +578,28 @@ private fun PaceRing(percent: Int, color: Color, sizeDp: Int, text: String, labe
 private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
     var showDrink by remember { mutableStateOf(false) }
     var showMeal by remember { mutableStateOf(false) }
+    val skin = LocalSkin.current
+    val activeDrink = state.activeDrink
 
     Row(
         modifier = Modifier.padding(horizontal = spec.pagePadding.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        ActionButton("+ Log a drink", MonkSurface3, MonkAmber, Modifier.weight(2f)) { showDrink = true }
-        ActionButton("🍛 Log meal", MonkSurface2, MonkGreen, Modifier.weight(1f)) { showMeal = true }
+        if (activeDrink == null) {
+            ActionButton("+ Start a drink", skin.surface3, skin.accent, Modifier.weight(2f)) { showDrink = true }
+        } else {
+            ActionButton("End current drink · ${formatDuration(state.nowMillis - activeDrink.startedAtMillis)}", skin.surface3, skin.red, Modifier.weight(2f)) {
+                actions.endDrink()
+            }
+        }
+        ActionButton("🍛 Log meal", skin.surface2, skin.green, Modifier.weight(1f)) { showMeal = true }
     }
 
     if (showDrink) {
         ModalBottomSheet(
             onDismissRequest = { showDrink = false },
-            containerColor = MonkSurface2,
-            contentColor = MonkCream,
+            containerColor = skin.surface2,
+            contentColor = skin.text,
             dragHandle = null
         ) {
             var selectedVolume by remember(showDrink) { mutableStateOf(30.0) }
@@ -658,9 +610,9 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignS
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Log a drink", color = MonkAmber, fontFamily = Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text(state.profile?.drinkName.orEmpty(), color = MonkCream, fontFamily = Mono, fontSize = 13.sp, modifier = Modifier.background(MonkSurface3, CircleShape).padding(horizontal = 14.dp, vertical = 6.dp))
-                Text("Volume", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
+                Text("Start a drink", color = skin.accent, fontFamily = Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(state.profile?.drinkName.orEmpty(), color = skin.text, fontFamily = Mono, fontSize = 13.sp, modifier = Modifier.background(skin.surface3, CircleShape).padding(horizontal = 14.dp, vertical = 6.dp))
+                Text("Volume", color = skin.muted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(30.0 to "30 ml · chhota", 60.0 to "60 ml · large").forEach { (ml, label) ->
                         GhostButton(label, Modifier.weight(1f), selected = selectedVolume == ml) { selectedVolume = ml }
@@ -672,7 +624,7 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignS
                     }
                     GhostButton("Custom →", Modifier.weight(1f), selected = selectedVolume == 0.0) { selectedVolume = 0.0 }
                 }
-                Text("Stomach right now", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
+                Text("Stomach right now", color = skin.muted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FoodLevel.entries.forEach { food ->
                         FoodMini(food, selectedFood == food, Modifier.weight(1f)) {
@@ -690,9 +642,9 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignS
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 4.dp)) {
                     GhostButton("Cancel", Modifier.weight(1f)) { showDrink = false }
-                    AmberButton("Log it", Modifier.weight(2f)) {
+                    AmberButton("Start drink", Modifier.weight(2f)) {
                         val volume = if (selectedVolume == 0.0) null else selectedVolume
-                        actions.logDrink(volumeMl = volume, foodLevel = selectedFood)
+                        actions.startDrink(volumeMl = volume, foodLevel = selectedFood)
                         showDrink = false
                     }
                 }
@@ -704,8 +656,8 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignS
     if (showMeal) {
         ModalBottomSheet(
             onDismissRequest = { showMeal = false },
-            containerColor = MonkSurface2,
-            contentColor = MonkCream,
+            containerColor = skin.surface2,
+            contentColor = skin.text,
             dragHandle = null
         ) {
             Column(
@@ -714,8 +666,8 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignS
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("🍛 Log a meal", color = MonkGreen, fontFamily = Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("What did you eat?", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
+                Text("🍛 Log a meal", color = skin.green, fontFamily = Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("What did you eat?", color = skin.muted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FoodLevel.entries.drop(1).forEach { food ->
                         FoodMini(food, state.mealDraft.foodLevel == food, Modifier.weight(1f), green = true) {
@@ -723,7 +675,7 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignS
                         }
                     }
                 }
-                Text("When?", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
+                Text("When?", color = skin.muted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(0 to "Just now", 30 to "30 min ago").forEach { (offset, label) ->
                         GhostButton(label, Modifier.weight(1f), selected = state.mealDraft.offsetMinutes == offset) {
@@ -747,7 +699,7 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignS
                         },
                         modifier = Modifier.weight(2f).height(52.dp),
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MonkGreen, contentColor = MonkBg)
+                        colors = ButtonDefaults.buttonColors(containerColor = skin.green, contentColor = skin.bg)
                     ) {
                         Text("Log meal", fontFamily = Serif, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     }
@@ -773,21 +725,22 @@ private fun FoodSelector(state: DrukUiState, actions: DrukViewModel, spec: Desig
     }
     val food = state.settings.foodLevel
     if (spec.showFoodDetail) {
-        DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = MonkSurface1, radius = 9, padding = 12) {
+        val skin = LocalSkin.current
+        DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = 9, padding = 12) {
             Text(
                 buildAnnotatedString {
-                    withStyle(SpanStyle(color = MonkCream, fontWeight = FontWeight.Bold)) {
+                    withStyle(SpanStyle(color = skin.text, fontWeight = FontWeight.Bold)) {
                         append("${food.emoji()} ${food.label}")
                     }
                     append(" — ${(food.deficit * 100).toInt()}% of each peg absorbed before reaching blood.\n")
                     append("Peak BAC arrives ~${food.lagMinutes} min after drinking, not immediately.")
                 },
-                color = MonkMuted,
+                color = skin.muted,
                 fontFamily = Mono,
                 fontSize = 11.sp,
                 lineHeight = 18.sp
             )
-            Text("Elimination rate (0.15‰/hr) is unchanged — food only slows absorption.", color = MonkAmberMuted, fontFamily = Mono, fontSize = 10.sp)
+            Text("Elimination rate (0.15‰/hr) is unchanged — food only slows absorption.", color = skin.accentMuted, fontFamily = Mono, fontSize = 10.sp)
         }
     }
 }
@@ -821,7 +774,7 @@ private fun SchemeSelector(state: DrukUiState, actions: DrukViewModel, spec: Des
                     .padding(3.dp)
                     .size(if (index == pagerState.currentPage) 9.dp else 6.dp)
                     .clip(CircleShape)
-                    .background(if (index == pagerState.currentPage) scheme.color() else LocalSkin.current.border)
+                    .background(if (index == pagerState.currentPage) scheme.color(LocalSkin.current) else LocalSkin.current.border)
             )
         }
     }
@@ -829,23 +782,24 @@ private fun SchemeSelector(state: DrukUiState, actions: DrukViewModel, spec: Des
 
 @Composable
 private fun SchemeCard(scheme: TargetScheme, plan: com.druk.app.domain.SchemePlan?, selected: Boolean, spec: DesignSpec, onClick: () -> Unit) {
-    val color = scheme.color()
+    val skin = LocalSkin.current
+    val color = scheme.color(skin)
     Column(
         modifier = Modifier
             .width(spec.schemeWidth.dp)
             .clip(RoundedCornerShape(14.dp))
-            .background(MonkSurface2)
-            .border(if (selected) 1.5.dp else 1.dp, if (selected) color else MonkBorder, RoundedCornerShape(14.dp))
+            .background(skin.surface2)
+            .border(if (selected) 1.5.dp else 1.dp, if (selected) color else skin.border, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
             .padding(spec.cardPadding.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(scheme.emoji(), fontSize = 18.sp)
-            Text(scheme.label, color = if (selected) color else MonkCream, fontFamily = Serif, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(scheme.label, color = if (selected) color else skin.text, fontFamily = Serif, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text("${BacFormat.format(scheme.targetBac)}%", color = color, fontFamily = Mono, fontSize = 11.sp, modifier = Modifier.background(Color.Black.copy(alpha = 0.30f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp))
         }
-        Text(scheme.feel, color = MonkMuted, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 12.sp, lineHeight = 17.sp)
+        Text(scheme.feel, color = skin.muted, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 12.sp, lineHeight = 17.sp)
         if (plan != null) {
             SchemeNumber("${OneDecimal.format(plan.pegsToReach)} × 30ml pegs to reach")
             SchemeNumber("1 peg every ${plan.maintenanceMinutes} min to hold")
@@ -857,15 +811,16 @@ private fun SchemeCard(scheme: TargetScheme, plan: com.druk.app.domain.SchemePla
 
 @Composable
 private fun PlanGuide(state: DrukUiState, spec: DesignSpec) {
+    val skin = LocalSkin.current
     SectionLabel("Your drinking guide", spec = spec)
-    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = MonkSurface1, radius = spec.cardRadius, padding = 0) {
+    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = 0) {
         val plan = state.selectedPlan
         val scheme = state.settings.selectedScheme
         val profile = state.profile
         if (plan == null || scheme == null || profile == null) {
             Text(
                 "Select a scheme above for your step-by-step guide.",
-                color = MonkMuted,
+                color = skin.muted,
                 fontFamily = Serif,
                 fontStyle = FontStyle.Italic,
                 fontSize = 14.sp,
@@ -900,7 +855,7 @@ private fun PlanGuide(state: DrukUiState, spec: DesignSpec) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.20f))
+                        .background(skin.bg.copy(alpha = 0.20f))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
@@ -912,14 +867,14 @@ private fun PlanGuide(state: DrukUiState, spec: DesignSpec) {
             }
             Text(
                 "Real BAC varies ±30% with hydration, sleep, medications and individual enzyme differences. Never drive.",
-                color = Color(0xFFD07060),
+                color = skin.red,
                 fontFamily = Mono,
                 fontSize = 11.sp,
                 lineHeight = 16.sp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MonkRed.copy(alpha = 0.10f))
-                    .border(0.5.dp, MonkRed.copy(alpha = 0.25f))
+                    .background(skin.red.copy(alpha = 0.10f))
+                    .border(0.5.dp, skin.red.copy(alpha = 0.25f))
                     .padding(14.dp)
             )
         }
@@ -927,14 +882,16 @@ private fun PlanGuide(state: DrukUiState, spec: DesignSpec) {
 }
 
 @Composable
-private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: TargetScheme?, spec: DesignSpec) {
-    var selectedPoint by remember(actual) { mutableStateOf<BacPoint?>(actual.lastOrNull()) }
+private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, projection: List<BacPoint>, scheme: TargetScheme?, spec: DesignSpec) {
+    var selectedPoint by remember(actual, projection) { mutableStateOf<BacPoint?>(actual.lastOrNull() ?: projection.firstOrNull()) }
     val skin = LocalSkin.current
+    val allPoints = actual + target + projection
     SectionLabel("BAC curve", spec = spec)
     DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = spec.cardPadding) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CurveChip("▶ Actual", skin.accent)
-            CurveChip("${scheme?.emoji() ?: "◇"} ${scheme?.label ?: "Plan"}", scheme?.color() ?: skin.green)
+            CurveChip("⌁ Projection", skin.green)
+            CurveChip("${scheme?.emoji() ?: "◇"} ${scheme?.label ?: "Plan"}", scheme?.color(skin) ?: skin.green)
             CurveChip("Zones", skin.muted)
         }
         Canvas(
@@ -947,11 +904,11 @@ private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: Tar
                         listOf(skin.surface2.copy(alpha = 0.92f), skin.surface1)
                     )
                 )
-                .pointerInput(actual, target) {
+                .pointerInput(actual, target, projection) {
                     detectTapGestures { offset ->
-                        val points = actual.ifEmpty { target }
+                        val points = actual.ifEmpty { projection.ifEmpty { target } }
                         if (points.isNotEmpty()) {
-                            val maxX = max((actual + target).maxOfOrNull { it.hours } ?: 10.0, 10.0)
+                            val maxX = max(allPoints.maxOfOrNull { it.hours } ?: 10.0, 10.0)
                             selectedPoint = points.minByOrNull { point ->
                                 val x = (point.hours / maxX).toFloat() * size.width
                                 abs(x - offset.x)
@@ -960,10 +917,10 @@ private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: Tar
                     }
                 }
         ) {
-            val maxX = max((actual + target).maxOfOrNull { it.hours } ?: 10.0, 10.0)
-            val maxY = max((actual + target).maxOfOrNull { it.bac } ?: 0.12, 0.12)
+            val maxX = max(allPoints.maxOfOrNull { it.hours } ?: 10.0, 10.0)
+            val maxY = max(allPoints.maxOfOrNull { it.bac } ?: 0.12, 0.12)
             val grid = skin.border.copy(alpha = 0.34f)
-            val zoneColors = listOf(MonkGreen, MonkAmber, MonkOrange, MonkRed)
+            val zoneColors = listOf(skin.green, skin.accent, skin.orange, skin.red)
             listOf(0.03, 0.06, 0.09, 0.12).forEachIndexed { index, bac ->
                 val y = size.height - (bac / maxY).toFloat() * size.height
                 drawRect(
@@ -991,9 +948,10 @@ private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: Tar
             }
             TargetScheme.entries.forEach {
                 val y = size.height - (it.targetBac / maxY).toFloat() * size.height
-                drawLine(it.color().copy(alpha = 0.34f), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                drawLine(it.color(skin).copy(alpha = 0.34f), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
             }
-            drawPathLine(target, (scheme?.color() ?: MonkAmber).copy(alpha = 0.85f), 3f)
+            drawPathLine(target, (scheme?.color(skin) ?: skin.accent).copy(alpha = 0.65f), 2.5f)
+            drawPathLine(projection, skin.green.copy(alpha = 0.75f), 3.5f)
             drawPathLine(actual, skin.accent, 5f)
             selectedPoint?.let { point ->
                 val p = map(point)
@@ -1025,10 +983,11 @@ private fun CurveChip(label: String, color: Color) {
 
 @Composable
 private fun TimelineCard(items: List<TimelineItem>, actions: DrukViewModel, state: DrukUiState, spec: DesignSpec) {
+    val skin = LocalSkin.current
     SectionLabel("Timeline", spec = spec)
     Column(modifier = Modifier.padding(horizontal = spec.pagePadding.dp)) {
         if (items.isEmpty()) {
-            Text("Nothing logged yet.", color = MonkMuted, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
+            Text("Nothing logged yet.", color = skin.muted, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
         } else {
             items.forEach { item ->
                 TimelineRow(item, state, actions)
@@ -1039,19 +998,20 @@ private fun TimelineCard(items: List<TimelineItem>, actions: DrukViewModel, stat
 
 @Composable
 private fun TimelineRow(item: TimelineItem, state: DrukUiState, actions: DrukViewModel) {
+    val skin = LocalSkin.current
     val isMeal = item is TimelineItem.Meal
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (isMeal) MonkGreen.copy(alpha = 0.05f) else Color.Transparent)
-            .border(0.5.dp, if (isMeal) MonkGreen.copy(alpha = 0.20f) else MonkBorder)
+            .background(if (isMeal) skin.green.copy(alpha = 0.05f) else Color.Transparent)
+            .border(0.5.dp, if (isMeal) skin.green.copy(alpha = 0.20f) else skin.border)
             .padding(vertical = 10.dp, horizontal = if (isMeal) 10.dp else 0.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(Modifier.weight(1f)) {
             Text(
                 "${ClockFormat.format(Date(item.timestampMillis))}  +${state.activeSession?.let { OneDecimal.format((item.timestampMillis - it.startedAtMillis) / 3_600_000.0) } ?: "0.0"}h",
-                color = if (isMeal) MonkGreen else MonkAmber,
+                color = if (isMeal) skin.green else skin.accent,
                 fontFamily = Mono,
                 fontSize = 12.sp
             )
@@ -1059,46 +1019,49 @@ private fun TimelineRow(item: TimelineItem, state: DrukUiState, actions: DrukVie
                 is TimelineItem.Drink -> {
                     Text(
                         "${state.profile?.drinkName.orEmpty()} · ${item.value.volumeMl.toInt()}ml · ${OneDecimal.format(item.value.abv)}%ABV · ${item.value.foodLevel.emoji()}${(item.value.foodLevel.deficit * 100).toInt()}%↓",
-                        color = MonkMuted,
+                        color = skin.muted,
                         fontSize = 12.sp
                     )
-                    Text("${OneDecimal.format(item.value.gramsAlcohol)}g → ${OneDecimal.format(item.value.gramsAlcohol * (1.0 - item.value.foodLevel.deficit))}g absorbed", color = MonkCream, fontFamily = Mono, fontSize = 11.sp)
+                    val duration = item.value.endedAtMillis?.let { formatDuration(it - item.value.startedAtMillis) }
+                        ?: "in progress · ${formatDuration(state.nowMillis - item.value.startedAtMillis)}"
+                    Text("${OneDecimal.format(item.value.gramsAlcohol)}g → ${OneDecimal.format(item.value.gramsAlcohol * (1.0 - item.value.foodLevel.deficit))}g absorbed · $duration", color = skin.text, fontFamily = Mono, fontSize = 11.sp)
                 }
                 is TimelineItem.Meal -> {
-                    Text("${item.value.foodLevel.emoji()} ${item.value.foodLevel.label} logged — ${(item.value.foodLevel.deficit * 100).toInt()}% deficit · peaks +${item.value.foodLevel.lagMinutes}min", color = MonkMuted, fontSize = 12.sp)
-                    Text("Food event", color = MonkGreen, fontFamily = Mono, fontSize = 11.sp)
+                    Text("${item.value.foodLevel.emoji()} ${item.value.foodLevel.label} logged — ${(item.value.foodLevel.deficit * 100).toInt()}% deficit · peaks +${item.value.foodLevel.lagMinutes}min", color = skin.muted, fontSize = 12.sp)
+                    Text("Food event", color = skin.green, fontFamily = Mono, fontSize = 11.sp)
                 }
             }
         }
         TextButton(onClick = { actions.deleteTimelineItem(item) }) {
-            Text("Delete", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp)
+            Text("Delete", color = skin.muted, fontFamily = Mono, fontSize = 11.sp)
         }
     }
 }
 
 @Composable
 private fun Footer(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
+    val skin = LocalSkin.current
     Column(
         modifier = Modifier
             .padding(horizontal = spec.pagePadding.dp, vertical = 16.dp)
             .navigationBarsPadding()
-            .border(0.5.dp, MonkBorder)
+            .border(0.5.dp, skin.border)
             .padding(top = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("Seidl 2000 + Widmark · r = ${state.profile?.let { DecimalFormat("0.000").format(it.r) } ?: "—"} · β = 0.15‰/hr", color = MonkMuted, fontFamily = Mono, fontSize = 10.sp)
-        Text("Estimates ±30% variance. Never drive, even at sweet spot.", color = MonkRed, fontFamily = Mono, fontSize = 10.sp)
+        Text("Seidl 2000 + Widmark · r = ${state.profile?.let { DecimalFormat("0.000").format(it.r) } ?: "—"} · β = 0.15‰/hr", color = skin.muted, fontFamily = Mono, fontSize = 10.sp)
+        Text("Estimates ±30% variance. Never drive, even at sweet spot.", color = skin.red, fontFamily = Mono, fontSize = 10.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TextButton(onClick = actions::endSession, enabled = state.activeSession != null) {
-                Text("Clear session", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp)
+                Text("Clear session", color = skin.muted, fontFamily = Mono, fontSize = 11.sp)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Alerts", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp)
+                Text("Alerts", color = skin.muted, fontFamily = Mono, fontSize = 11.sp)
                 Switch(
                     checked = state.settings.notificationsEnabled,
                     onCheckedChange = actions::setNotificationsEnabled,
-                    colors = SwitchDefaults.colors(checkedThumbColor = MonkAmber, checkedTrackColor = MonkAmberMuted)
+                    colors = SwitchDefaults.colors(checkedThumbColor = skin.accent, checkedTrackColor = skin.accentMuted)
                 )
             }
         }
@@ -1106,8 +1069,22 @@ private fun Footer(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec)
 }
 
 @Composable
-private fun AccountPage(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
+private fun AccountPage(
+    state: DrukUiState,
+    actions: DrukViewModel,
+    theme: ThemeChoice,
+    onThemeChange: (ThemeChoice) -> Unit,
+    spec: DesignSpec
+) {
     val skin = LocalSkin.current
+    SectionLabel("Theme", "(choose your look)", spec)
+    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = spec.cardPadding) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+            ThemeChoice.entries.forEach { option ->
+                ThemeSwatch(option, selected = theme == option) { onThemeChange(option) }
+            }
+        }
+    }
     SectionLabel("Account", "(profile and session controls)", spec)
     DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = spec.cardPadding) {
         Text(state.profile?.name?.ifBlank { "You" } ?: "You", color = skin.text, fontFamily = Serif, fontSize = 26.sp, fontWeight = FontWeight.Bold)
@@ -1134,23 +1111,72 @@ private fun AccountPage(state: DrukUiState, actions: DrukViewModel, spec: Design
             GhostButton("End current session", Modifier.fillMaxWidth()) { actions.endSession() }
         }
     }
+    SessionHistoryViews(state, spec)
     Footer(state, actions, spec)
+}
+
+@Composable
+private fun SessionHistoryViews(state: DrukUiState, spec: DesignSpec) {
+    val skin = LocalSkin.current
+    SectionLabel("Previous sessions", "(calendar and sequence)", spec)
+    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = skin.surface1, radius = spec.cardRadius, padding = spec.cardPadding) {
+        CalendarPreview(state.completedSessions)
+        if (state.completedSessions.isEmpty()) {
+            Text("No completed sessions yet.", color = skin.muted, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 14.sp)
+        } else {
+            state.completedSessions.take(8).forEach { session ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(ClockFormat.format(Date(session.startedAtMillis)), color = skin.text, fontFamily = Mono, fontSize = 12.sp)
+                    Text(formatDuration((session.endedAtMillis ?: session.startedAtMillis) - session.startedAtMillis), color = skin.muted, fontFamily = Mono, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarPreview(sessions: List<com.druk.app.domain.SessionLog>) {
+    val skin = LocalSkin.current
+    val activeDays = sessions.map {
+        java.util.Calendar.getInstance().apply { timeInMillis = it.startedAtMillis }.get(java.util.Calendar.DAY_OF_MONTH)
+    }.toSet()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("This month", color = skin.accentMuted, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.2.sp)
+        repeat(5) { week ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                repeat(7) { day ->
+                    val number = week * 7 + day + 1
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(if (number in activeDays) skin.accent.copy(alpha = 0.35f) else skin.surface2)
+                            .border(1.dp, if (number in activeDays) skin.accent else skin.border, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(number.toString(), color = if (number in activeDays) skin.text else skin.muted, fontFamily = Mono, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 private fun DarkCard(
     modifier: Modifier = Modifier,
     background: Brush? = null,
-    backgroundColor: Color = MonkSurface2,
+    backgroundColor: Color = Color.Unspecified,
     radius: Int = 14,
     padding: Int = 16,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val skin = LocalSkin.current
+    val resolvedBackground = if (backgroundColor == Color.Unspecified) skin.surface2 else backgroundColor
     val base = modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(radius.dp))
-        .then(if (background != null) Modifier.background(background) else Modifier.background(backgroundColor))
+        .then(if (background != null) Modifier.background(background) else Modifier.background(resolvedBackground))
         .border(1.dp, skin.border, RoundedCornerShape(radius.dp))
         .padding(padding.dp)
     Column(modifier = base, verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
@@ -1321,35 +1347,37 @@ private fun Meta(label: String, value: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun SchemeNumber(text: String) {
-    Text(text, color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, lineHeight = 15.sp)
+    Text(text, color = LocalSkin.current.muted, fontFamily = Mono, fontSize = 11.sp, lineHeight = 15.sp)
 }
 
 @Composable
 private fun GuideStep(label: String, main: String, sub: AnnotatedBuilder.() -> Unit) {
+    val skin = LocalSkin.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(0.5.dp, MonkBorder)
+            .border(0.5.dp, skin.border)
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(label.uppercase(), color = MonkAmberMuted, fontFamily = Mono, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-        Text(main, color = MonkCream, fontFamily = Serif, fontSize = 18.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp)
-        val builder = AnnotatedBuilder()
+        Text(label.uppercase(), color = skin.accentMuted, fontFamily = Mono, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+        Text(main, color = skin.text, fontFamily = Serif, fontSize = 18.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp)
+        val builder = AnnotatedBuilder(skin.text)
         builder.sub()
-        Text(builder.value, color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, lineHeight = 17.sp)
+        Text(builder.value, color = skin.muted, fontFamily = Mono, fontSize = 11.sp, lineHeight = 17.sp)
     }
 }
 
 @Composable
 private fun MetaRow(label: String, value: String) {
+    val skin = LocalSkin.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = MonkMuted, fontFamily = Mono, fontSize = 11.sp)
-        Text(value, color = MonkCream, fontFamily = Mono, fontSize = 11.sp)
+        Text(label, color = skin.muted, fontFamily = Mono, fontSize = 11.sp)
+        Text(value, color = skin.text, fontFamily = Mono, fontSize = 11.sp)
     }
 }
 
-private class AnnotatedBuilder {
+private class AnnotatedBuilder(private val strongColor: Color) {
     private val parts = mutableListOf<Pair<String, Boolean>>()
     fun append(text: String) {
         parts += text to false
@@ -1360,21 +1388,23 @@ private class AnnotatedBuilder {
     val value
         get() = buildAnnotatedString {
             parts.forEach { (text, strong) ->
-                if (strong) withStyle(SpanStyle(color = MonkCream, fontWeight = FontWeight.Bold)) { append(text) } else append(text)
+                if (strong) withStyle(SpanStyle(color = strongColor, fontWeight = FontWeight.Bold)) { append(text) } else append(text)
             }
         }
 }
 
 private data class BacStatus(val label: String, val color: Color)
 
+@Composable
 private fun bacStatus(bac: Double): BacStatus {
+    val skin = LocalSkin.current
     return when {
-        bac <= 0.005 -> BacStatus("Clear", MonkMuted)
-        bac <= 0.03 -> BacStatus("Monk's Whisper 🌿", MonkGreen)
-        bac <= 0.06 -> BacStatus("Druk zone ✦", MonkAmber)
-        bac <= 0.09 -> BacStatus("Buzzed 🔥", MonkOrange)
-        bac <= 0.15 -> BacStatus("Drunk 💀", MonkRed)
-        else -> BacStatus("Danger — stop", MonkRed)
+        bac <= 0.005 -> BacStatus("Clear", skin.muted)
+        bac <= 0.03 -> BacStatus("Monk's Whisper 🌿", skin.green)
+        bac <= 0.06 -> BacStatus("Druk zone ✦", skin.accent)
+        bac <= 0.09 -> BacStatus("Buzzed 🔥", skin.orange)
+        bac <= 0.15 -> BacStatus("Drunk 💀", skin.red)
+        else -> BacStatus("Danger — stop", skin.red)
     }
 }
 
@@ -1396,12 +1426,12 @@ private fun TargetScheme.emoji(): String {
     }
 }
 
-private fun TargetScheme.color(): Color {
+private fun TargetScheme.color(skin: Skin): Color {
     return when (this) {
-        TargetScheme.Whisper -> MonkGreen
-        TargetScheme.Druk -> MonkAmber
-        TargetScheme.LooseCannon -> MonkOrange
-        TargetScheme.DeepEnd -> MonkRed
+        TargetScheme.Whisper -> skin.green
+        TargetScheme.Druk -> skin.accent
+        TargetScheme.LooseCannon -> skin.orange
+        TargetScheme.DeepEnd -> skin.red
     }
 }
 

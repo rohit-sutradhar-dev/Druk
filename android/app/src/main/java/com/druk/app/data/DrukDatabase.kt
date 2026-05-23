@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.druk.app.domain.AppSettings
 import com.druk.app.domain.DrinkLog
 import com.druk.app.domain.FoodLevel
@@ -28,7 +30,7 @@ import kotlinx.coroutines.flow.Flow
         MealEntity::class,
         SettingsEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class DrukDatabase : RoomDatabase() {
@@ -44,7 +46,15 @@ abstract class DrukDatabase : RoomDatabase() {
                     context.applicationContext,
                     DrukDatabase::class.java,
                     "druk.db"
-                ).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+            }
+        }
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE drinks ADD COLUMN startedAtMillis INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE drinks ADD COLUMN endedAtMillis INTEGER")
+                db.execSQL("UPDATE drinks SET startedAtMillis = timestampMillis, endedAtMillis = timestampMillis WHERE startedAtMillis = 0")
             }
         }
     }
@@ -93,6 +103,12 @@ interface DrukDao {
 
     @Insert
     suspend fun insertDrink(drink: DrinkEntity): Long
+
+    @Query("SELECT * FROM drinks WHERE sessionId = :sessionId AND endedAtMillis IS NULL ORDER BY startedAtMillis DESC LIMIT 1")
+    suspend fun getActiveDrink(sessionId: Long): DrinkEntity?
+
+    @Query("UPDATE drinks SET endedAtMillis = :endedAtMillis, timestampMillis = :endedAtMillis WHERE id = :drinkId")
+    suspend fun endDrink(drinkId: Long, endedAtMillis: Long)
 
     @Insert
     suspend fun insertMeal(meal: MealEntity): Long
@@ -168,6 +184,8 @@ data class DrinkEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sessionId: Long,
     val timestampMillis: Long,
+    val startedAtMillis: Long,
+    val endedAtMillis: Long?,
     val volumeMl: Double,
     val abv: Double,
     val gramsAlcohol: Double,
@@ -179,6 +197,8 @@ data class DrinkEntity(
             id = id,
             sessionId = sessionId,
             timestampMillis = timestampMillis,
+            startedAtMillis = startedAtMillis,
+            endedAtMillis = endedAtMillis,
             volumeMl = volumeMl,
             abv = abv,
             gramsAlcohol = gramsAlcohol,

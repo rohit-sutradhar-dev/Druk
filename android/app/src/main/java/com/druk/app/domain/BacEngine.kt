@@ -31,9 +31,11 @@ object BacEngine {
         if (profile == null || drinks.isEmpty()) return 0.0
         val distributionMass = profile.r * profile.weightKg
         val events = drinks
+            .map { drink -> effectiveDrinkAt(drink, atMillis) }
+            .filter { it.gramsAlcohol > 0.0 }
             .map {
                 AbsorptionEvent(
-                    timestampMillis = it.timestampMillis + it.foodLevel.lagMinutes * 60_000L,
+                    timestampMillis = absorptionBaseMillis(it, atMillis) + it.foodLevel.lagMinutes * 60_000L,
                     grams = it.gramsAlcohol * (1.0 - it.foodLevel.deficit)
                 )
             }
@@ -163,6 +165,56 @@ object BacEngine {
         return points
     }
 
+    fun projectedCurve(
+        drinks: List<DrinkLog>,
+        profile: UserProfile?,
+        session: SessionLog?,
+        scheme: TargetScheme?,
+        foodLevel: FoodLevel,
+        nowMillis: Long
+    ): List<BacPoint> {
+        if (profile == null || session == null || scheme == null) return emptyList()
+        val plan = schemePlan(scheme, profile, foodLevel)
+        val projected = drinks.toMutableList()
+        val horizonMillis = nowMillis + 6 * 3_600_000L
+        var at = (drinks.filter { it.endedAtMillis != null }.maxOfOrNull { it.endedAtMillis ?: it.timestampMillis }
+            ?: session.startedAtMillis).coerceAtLeast(nowMillis)
+        var guard = 0
+        while (at < horizonMillis && guard < 28) {
+            val current = bacAt(projected, profile, at)
+            val target = scheme.targetBac
+            val intervalMinutes = if (current < target - TARGET_BAND) {
+                plan.rampIntervalMinutes.coerceAtLeast(8)
+            } else {
+                plan.maintenanceMinutes.coerceAtLeast(10)
+            }
+            at += intervalMinutes * 60_000L
+            val activeAt = at + 12 * 60_000L
+            projected += DrinkLog(
+                id = -guard.toLong() - 1,
+                sessionId = session.id,
+                timestampMillis = activeAt,
+                startedAtMillis = at,
+                endedAtMillis = activeAt,
+                volumeMl = PEG_ML,
+                abv = profile.drinkAbv,
+                gramsAlcohol = alcoholGrams(PEG_ML, profile.drinkAbv),
+                calories = profile.caloriesPer30Ml,
+                foodLevel = foodLevel
+            )
+            guard += 1
+        }
+
+        val points = mutableListOf<BacPoint>()
+        var sampleAt = session.startedAtMillis
+        val endMillis = max(horizonMillis, session.startedAtMillis + 9 * 3_600_000L)
+        while (sampleAt <= endMillis) {
+            points += BacPoint(hoursBetween(session.startedAtMillis, sampleAt), bacAt(projected, profile, sampleAt))
+            sampleAt += 15 * 60_000L
+        }
+        return points
+    }
+
     fun targetCurve(scheme: TargetScheme?, foodLevel: FoodLevel): List<BacPoint> {
         if (scheme == null) return emptyList()
         val points = mutableListOf<BacPoint>()
@@ -199,9 +251,31 @@ object BacEngine {
         return (endMillis - startMillis).coerceAtLeast(0L) / 3_600_000.0
     }
 
+    private fun effectiveDrinkAt(drink: DrinkLog, atMillis: Long): DrinkLog {
+        val ended = drink.endedAtMillis
+        if (ended != null) return drink
+        val elapsed = (atMillis - drink.startedAtMillis).coerceAtLeast(0L)
+        val assumedSipMillis = 20 * 60_000L
+        val fraction = (elapsed.toDouble() / assumedSipMillis).coerceIn(0.0, 0.95)
+        return drink.copy(
+            timestampMillis = atMillis,
+            gramsAlcohol = drink.gramsAlcohol * fraction,
+            calories = drink.calories * fraction
+        )
+    }
+
+    private fun absorptionBaseMillis(drink: DrinkLog, atMillis: Long): Long {
+        val ended = drink.endedAtMillis
+        return if (ended == null) {
+            val elapsed = (atMillis - drink.startedAtMillis).coerceAtLeast(0L)
+            drink.startedAtMillis + elapsed / 2
+        } else {
+            drink.startedAtMillis + (ended - drink.startedAtMillis).coerceAtLeast(0L) / 2
+        }
+    }
+
     private data class AbsorptionEvent(
         val timestampMillis: Long,
         val grams: Double
     )
 }
-

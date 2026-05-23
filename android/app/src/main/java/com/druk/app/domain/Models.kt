@@ -50,6 +50,8 @@ data class DrinkLog(
     val id: Long = 0,
     val sessionId: Long,
     val timestampMillis: Long,
+    val startedAtMillis: Long,
+    val endedAtMillis: Long?,
     val volumeMl: Double,
     val abv: Double,
     val gramsAlcohol: Double,
@@ -102,4 +104,3 @@ data class BacPoint(
     val hours: Double,
     val bac: Double
 )
-

@@ -32,6 +32,8 @@ class BacEngineTest {
         val drink = DrinkLog(
             sessionId = 1,
             timestampMillis = 0,
+            startedAtMillis = 0,
+            endedAtMillis = 0,
             volumeMl = 30.0,
             abv = 40.0,
             gramsAlcohol = BacEngine.alcoholGrams(30.0, 40.0),
@@ -48,6 +50,8 @@ class BacEngineTest {
         val drink = DrinkLog(
             sessionId = 1,
             timestampMillis = 0,
+            startedAtMillis = 0,
+            endedAtMillis = 0,
             volumeMl = 90.0,
             abv = 40.0,
             gramsAlcohol = BacEngine.alcoholGrams(90.0, 40.0),
@@ -99,4 +103,3 @@ class BacEngineTest {
         assertEquals(PacerKind.DrinkNow, state.kind)
     }
 }
-

@@ -36,6 +36,7 @@ data class DrukUiState(
     val completedSessions: List<SessionLog> = emptyList(),
     val drinks: List<DrinkLog> = emptyList(),
     val meals: List<MealLog> = emptyList(),
+    val activeDrink: DrinkLog? = null,
     val currentBac: Double = 0.0,
     val soberHours: Double = 0.0,
     val elapsedMillis: Long = 0L,
@@ -43,6 +44,7 @@ data class DrukUiState(
     val selectedPlan: SchemePlan? = null,
     val actualCurve: List<BacPoint> = emptyList(),
     val targetCurve: List<BacPoint> = emptyList(),
+    val projectionCurve: List<BacPoint> = emptyList(),
     val nowMillis: Long = System.currentTimeMillis(),
     val setup: SetupDraft = SetupDraft(),
     val customDrink: DrinkDraft = DrinkDraft(),
@@ -212,7 +214,7 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(permissionRequested = true) }
     }
 
-    fun logDrink(volumeMl: Double? = null, foodLevel: FoodLevel? = null) {
+    fun startDrink(volumeMl: Double? = null, foodLevel: FoodLevel? = null) {
         val profile = state.value.profile ?: return
         val settings = state.value.settings
         val draft = state.value.customDrink
@@ -221,7 +223,15 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
         val drinkFoodLevel = foodLevel ?: settings.foodLevel
         viewModelScope.launch {
             val at = System.currentTimeMillis()
-            repository.logDrink(profile, drinkFoodLevel, volume, abv, at)
+            repository.startDrink(profile, drinkFoodLevel, volume, abv, at)
+            now.value = at
+        }
+    }
+
+    fun endDrink() {
+        viewModelScope.launch {
+            val at = System.currentTimeMillis()
+            repository.endActiveDrink(at)
             now.value = at
         }
     }
@@ -270,6 +280,7 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
                 completedSessions = base.completedSessions,
                 drinks = full.drinks,
                 meals = full.meals,
+                activeDrink = full.drinks.firstOrNull { it.endedAtMillis == null },
                 currentBac = currentBac,
                 soberHours = BacEngine.soberHours(currentBac),
                 elapsedMillis = elapsed.coerceAtLeast(0L),
@@ -277,6 +288,7 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
                 selectedPlan = plan,
                 actualCurve = BacEngine.actualCurve(full.drinks, profile, session, nowMillis),
                 targetCurve = BacEngine.targetCurve(base.settings.selectedScheme, base.settings.foodLevel),
+                projectionCurve = BacEngine.projectedCurve(full.drinks, profile, session, base.settings.selectedScheme, base.settings.foodLevel, nowMillis),
                 nowMillis = nowMillis
             )
         }
