@@ -212,15 +212,16 @@ class DrukViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(permissionRequested = true) }
     }
 
-    fun logDrink(volumeMl: Double? = null) {
+    fun logDrink(volumeMl: Double? = null, foodLevel: FoodLevel? = null) {
         val profile = state.value.profile ?: return
         val settings = state.value.settings
         val draft = state.value.customDrink
         val volume = volumeMl ?: draft.volumeMl.toDoubleOrNull()?.coerceIn(1.0, 1000.0) ?: 30.0
         val abv = draft.abv.toDoubleOrNull()?.coerceIn(1.0, 99.0) ?: profile.drinkAbv
+        val drinkFoodLevel = foodLevel ?: settings.foodLevel
         viewModelScope.launch {
             val at = System.currentTimeMillis()
-            repository.logDrink(profile, settings, volume, abv, at)
+            repository.logDrink(profile, drinkFoodLevel, volume, abv, at)
             now.value = at
         }
     }

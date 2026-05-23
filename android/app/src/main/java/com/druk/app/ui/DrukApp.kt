@@ -9,13 +9,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -85,12 +88,74 @@ private val ClockFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 private val Mono = FontFamily.Monospace
 private val Serif = FontFamily.Serif
 
+private enum class DesignVariant(val label: String) {
+    ClassicClean("Classic Clean"),
+    Focus("Focus"),
+    Compact("Compact")
+}
+
+private data class DesignSpec(
+    val pagePadding: Int,
+    val cardPadding: Int,
+    val cardRadius: Int,
+    val bacSize: Int,
+    val bacLineHeight: Int,
+    val paceTitleSize: Int,
+    val paceRingSize: Int,
+    val schemeWidth: Int,
+    val showFoodDetail: Boolean,
+    val showFullGuide: Boolean
+)
+
+private fun DesignVariant.spec(): DesignSpec {
+    return when (this) {
+        DesignVariant.ClassicClean -> DesignSpec(
+            pagePadding = 16,
+            cardPadding = 16,
+            cardRadius = 16,
+            bacSize = 48,
+            bacLineHeight = 50,
+            paceTitleSize = 20,
+            paceRingSize = 64,
+            schemeWidth = 205,
+            showFoodDetail = true,
+            showFullGuide = true
+        )
+        DesignVariant.Focus -> DesignSpec(
+            pagePadding = 16,
+            cardPadding = 16,
+            cardRadius = 18,
+            bacSize = 56,
+            bacLineHeight = 58,
+            paceTitleSize = 22,
+            paceRingSize = 72,
+            schemeWidth = 190,
+            showFoodDetail = false,
+            showFullGuide = false
+        )
+        DesignVariant.Compact -> DesignSpec(
+            pagePadding = 14,
+            cardPadding = 14,
+            cardRadius = 12,
+            bacSize = 40,
+            bacLineHeight = 42,
+            paceTitleSize = 18,
+            paceRingSize = 56,
+            schemeWidth = 178,
+            showFoodDetail = false,
+            showFullGuide = false
+        )
+    }
+}
+
 @Composable
 fun DrukApp(
     state: DrukUiState,
     actions: DrukViewModel,
     requestNotificationPermission: () -> Unit
 ) {
+    var variant by remember { mutableStateOf(DesignVariant.ClassicClean) }
+    val spec = variant.spec()
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -99,7 +164,7 @@ fun DrukApp(
         if (state.profile == null) {
             SetupScreen(state, actions)
         } else {
-            MainScreen(state, actions, requestNotificationPermission)
+            MainScreen(state, actions, requestNotificationPermission, variant, spec) { variant = it }
         }
     }
 }
@@ -109,6 +174,8 @@ private fun SetupScreen(state: DrukUiState, actions: DrukViewModel) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .background(
                 Brush.radialGradient(
                     colors = listOf(Color(0xFF3D2010), MonkBg),
@@ -178,7 +245,10 @@ private fun SetupScreen(state: DrukUiState, actions: DrukViewModel) {
 private fun MainScreen(
     state: DrukUiState,
     actions: DrukViewModel,
-    requestNotificationPermission: () -> Unit
+    requestNotificationPermission: () -> Unit,
+    variant: DesignVariant,
+    spec: DesignSpec,
+    onVariantChange: (DesignVariant) -> Unit
 ) {
     val timeline = (state.drinks.map { TimelineItem.Drink(it) } + state.meals.map { TimelineItem.Meal(it) })
         .sortedByDescending { it.timestampMillis }
@@ -186,29 +256,33 @@ private fun MainScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .background(MonkBg),
+        contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { HeaderBar(state) }
-        item { SessionCard(state, actions, requestNotificationPermission) }
+        item { HeaderBar(state, spec) }
+        item { DesignSwitcher(variant, onVariantChange, spec) }
+        item { SessionCard(state, actions, requestNotificationPermission, spec) }
         if (state.activeSession != null) {
-            item { LogButtons(state, actions) }
+            item { LogButtons(state, actions, spec) }
         }
-        item { FoodSelector(state, actions) }
-        item { SchemeSelector(state, actions) }
-        item { PlanGuide(state) }
-        item { BacCurve(state.actualCurve, state.targetCurve, state.settings.selectedScheme) }
-        item { TimelineCard(timeline, actions, state) }
-        item { Footer(state, actions) }
+        item { FoodSelector(state, actions, spec) }
+        item { SchemeSelector(state, actions, spec) }
+        item { PlanGuide(state, spec) }
+        item { BacCurve(state.actualCurve, state.targetCurve, state.settings.selectedScheme, spec) }
+        item { TimelineCard(timeline, actions, state, spec) }
+        item { Footer(state, actions, spec) }
     }
 }
 
 @Composable
-private fun HeaderBar(state: DrukUiState) {
+private fun HeaderBar(state: DrukUiState, spec: DesignSpec) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 2.dp),
+            .padding(start = spec.pagePadding.dp, end = spec.pagePadding.dp, top = 8.dp, bottom = 0.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -218,15 +292,39 @@ private fun HeaderBar(state: DrukUiState) {
 }
 
 @Composable
+private fun DesignSwitcher(
+    variant: DesignVariant,
+    onVariantChange: (DesignVariant) -> Unit,
+    spec: DesignSpec
+) {
+    Row(
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = spec.pagePadding.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        DesignVariant.entries.forEach { option ->
+            GhostButton(
+                text = option.label,
+                selected = variant == option,
+                onClick = { onVariantChange(option) }
+            )
+        }
+    }
+}
+
+@Composable
 private fun SessionCard(
     state: DrukUiState,
     actions: DrukViewModel,
-    requestNotificationPermission: () -> Unit
+    requestNotificationPermission: () -> Unit,
+    spec: DesignSpec
 ) {
     DarkCard(
-        modifier = Modifier.padding(horizontal = 16.dp),
+        modifier = Modifier.padding(horizontal = spec.pagePadding.dp),
         background = Brush.linearGradient(listOf(Color(0xFF2E1A0F), MonkSurface1)),
-        radius = 16
+        radius = spec.cardRadius,
+        padding = spec.cardPadding
     ) {
         if (state.activeSession == null) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -254,13 +352,13 @@ private fun SessionCard(
                 }
             }
         } else {
-            ActiveSessionContent(state, actions)
+            ActiveSessionContent(state, actions, spec)
         }
     }
 }
 
 @Composable
-private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel) {
+private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
     val status = bacStatus(state.currentBac)
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Column(
@@ -274,9 +372,9 @@ private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel) {
                 "${BacFormat.format(state.currentBac)}%",
                 color = status.color,
                 fontFamily = Mono,
-                fontSize = 54.sp,
+                fontSize = spec.bacSize.sp,
                 fontWeight = FontWeight.Bold,
-                lineHeight = 56.sp
+                lineHeight = spec.bacLineHeight.sp
             )
             Text("${OneDecimal.format(state.currentBac * 10)}‰", color = MonkMuted, fontFamily = Mono, fontSize = 14.sp)
             Text(status.label, color = status.color, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 16.sp)
@@ -287,13 +385,13 @@ private fun ActiveSessionContent(state: DrukUiState, actions: DrukViewModel) {
             Meta("Calories", "${state.drinks.sumOf { it.calories }.toInt()} kcal", Modifier.weight(1f))
             Meta("Sober in", if (state.soberHours <= 0.05) "Now ✓" else "${OneDecimal.format(state.soberHours)}h", Modifier.weight(1f))
         }
-        PaceCard(state)
+        PaceCard(state, spec)
         GhostButton("Undo last log", enabled = state.drinks.isNotEmpty() || state.meals.isNotEmpty(), onClick = actions::undoLatest)
     }
 }
 
 @Composable
-private fun PaceCard(state: DrukUiState) {
+private fun PaceCard(state: DrukUiState, spec: DesignSpec) {
     val kind = state.pacerState.kind
     val color = when (kind) {
         PacerKind.DrinkNow -> MonkGreen
@@ -311,7 +409,7 @@ private fun PaceCard(state: DrukUiState) {
             .fillMaxWidth()
             .background(Color.Black.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
             .border(1.dp, MonkBorder, RoundedCornerShape(14.dp))
-            .padding(14.dp),
+            .padding(if (spec.cardPadding < 16) 12.dp else 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -324,12 +422,13 @@ private fun PaceCard(state: DrukUiState) {
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp
             )
-            Text(state.pacerState.title, color = color, fontFamily = Serif, fontSize = 20.sp, fontWeight = FontWeight.Bold, lineHeight = 22.sp)
+            Text(state.pacerState.title, color = color, fontFamily = Serif, fontSize = spec.paceTitleSize.sp, fontWeight = FontWeight.Bold, lineHeight = (spec.paceTitleSize + 2).sp)
             Text(state.pacerState.detail, color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, lineHeight = 16.sp)
         }
         PaceRing(
             percent = state.pacerState.progressPercent,
             color = color,
+            sizeDp = spec.paceRingSize,
             text = when (kind) {
                 PacerKind.DrinkNow -> "now"
                 PacerKind.Wait, PacerKind.Stop -> state.pacerState.remainingMillis?.let(BacEngine::formatShort) ?: "—"
@@ -341,9 +440,10 @@ private fun PaceCard(state: DrukUiState) {
 }
 
 @Composable
-private fun PaceRing(percent: Int, color: Color, text: String, label: String) {
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(72.dp)) {
-        Canvas(modifier = Modifier.size(64.dp)) {
+private fun PaceRing(percent: Int, color: Color, sizeDp: Int, text: String, label: String) {
+    val outer = sizeDp + 8
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(outer.dp)) {
+        Canvas(modifier = Modifier.size(sizeDp.dp)) {
             drawCircle(Color.White.copy(alpha = 0.08f))
             drawArc(color, -90f, 360f * percent.coerceIn(0, 100) / 100f, useCenter = true)
             drawCircle(MonkSurface1, radius = size.minDimension / 2f - 7.dp.toPx())
@@ -358,12 +458,12 @@ private fun PaceRing(percent: Int, color: Color, text: String, label: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LogButtons(state: DrukUiState, actions: DrukViewModel) {
+private fun LogButtons(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
     var showDrink by remember { mutableStateOf(false) }
     var showMeal by remember { mutableStateOf(false) }
 
     Row(
-        modifier = Modifier.padding(horizontal = 16.dp),
+        modifier = Modifier.padding(horizontal = spec.pagePadding.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         ActionButton("+ Log a drink", MonkSurface3, MonkAmber, Modifier.weight(2f)) { showDrink = true }
@@ -377,8 +477,12 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel) {
             contentColor = MonkCream,
             dragHandle = null
         ) {
+            var selectedVolume by remember(showDrink) { mutableStateOf(30.0) }
+            var selectedFood by remember(showDrink) { mutableStateOf(state.settings.foodLevel) }
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("Log a drink", color = MonkAmber, fontFamily = Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -386,26 +490,20 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel) {
                 Text("Volume", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(30.0 to "30 ml · chhota", 60.0 to "60 ml · large").forEach { (ml, label) ->
-                        GhostButton(label, Modifier.weight(1f)) {
-                            actions.logDrink(ml)
-                            showDrink = false
-                        }
+                        GhostButton(label, Modifier.weight(1f), selected = selectedVolume == ml) { selectedVolume = ml }
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(90.0 to "90 ml").forEach { (ml, label) ->
-                        GhostButton(label, Modifier.weight(1f)) {
-                            actions.logDrink(ml)
-                            showDrink = false
-                        }
+                        GhostButton(label, Modifier.weight(1f), selected = selectedVolume == ml) { selectedVolume = ml }
                     }
-                    GhostButton("Custom →", Modifier.weight(1f), selected = true) { }
+                    GhostButton("Custom →", Modifier.weight(1f), selected = selectedVolume == 0.0) { selectedVolume = 0.0 }
                 }
                 Text("Stomach right now", color = MonkMuted, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 1.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FoodLevel.entries.forEach { food ->
-                        FoodMini(food, state.settings.foodLevel == food, Modifier.weight(1f)) {
-                            actions.selectFood(food)
+                        FoodMini(food, selectedFood == food, Modifier.weight(1f)) {
+                            selectedFood = food
                         }
                     }
                 }
@@ -420,7 +518,8 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 4.dp)) {
                     GhostButton("Cancel", Modifier.weight(1f)) { showDrink = false }
                     AmberButton("Log it", Modifier.weight(2f)) {
-                        actions.logDrink()
+                        val volume = if (selectedVolume == 0.0) null else selectedVolume
+                        actions.logDrink(volumeMl = volume, foodLevel = selectedFood)
                         showDrink = false
                     }
                 }
@@ -437,7 +536,9 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel) {
             dragHandle = null
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("🍛 Log a meal", color = MonkGreen, fontFamily = Serif, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -485,10 +586,10 @@ private fun LogButtons(state: DrukUiState, actions: DrukViewModel) {
 }
 
 @Composable
-private fun FoodSelector(state: DrukUiState, actions: DrukViewModel) {
-    SectionLabel("Stomach level", "(affects absorption — tap to change)")
+private fun FoodSelector(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
+    SectionLabel("Stomach level", "(affects absorption — tap to change)", spec)
     Row(
-        modifier = Modifier.padding(horizontal = 16.dp),
+        modifier = Modifier.padding(horizontal = spec.pagePadding.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp)
     ) {
         FoodLevel.entries.forEach { food ->
@@ -498,37 +599,39 @@ private fun FoodSelector(state: DrukUiState, actions: DrukViewModel) {
         }
     }
     val food = state.settings.foodLevel
-    DarkCard(modifier = Modifier.padding(horizontal = 16.dp), backgroundColor = MonkSurface1, radius = 9, padding = 12) {
-        Text(
-            buildAnnotatedString {
-                withStyle(SpanStyle(color = MonkCream, fontWeight = FontWeight.Bold)) {
-                    append("${food.emoji()} ${food.label}")
-                }
-                append(" — ${(food.deficit * 100).toInt()}% of each peg absorbed before reaching blood.\n")
-                append("Peak BAC arrives ~${food.lagMinutes} min after drinking, not immediately.")
-            },
-            color = MonkMuted,
-            fontFamily = Mono,
-            fontSize = 11.sp,
-            lineHeight = 18.sp
-        )
-        Text("Elimination rate (0.15‰/hr) is unchanged — food only slows absorption.", color = MonkAmberMuted, fontFamily = Mono, fontSize = 10.sp)
+    if (spec.showFoodDetail) {
+        DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = MonkSurface1, radius = 9, padding = 12) {
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = MonkCream, fontWeight = FontWeight.Bold)) {
+                        append("${food.emoji()} ${food.label}")
+                    }
+                    append(" — ${(food.deficit * 100).toInt()}% of each peg absorbed before reaching blood.\n")
+                    append("Peak BAC arrives ~${food.lagMinutes} min after drinking, not immediately.")
+                },
+                color = MonkMuted,
+                fontFamily = Mono,
+                fontSize = 11.sp,
+                lineHeight = 18.sp
+            )
+            Text("Elimination rate (0.15‰/hr) is unchanged — food only slows absorption.", color = MonkAmberMuted, fontFamily = Mono, fontSize = 10.sp)
+        }
     }
 }
 
 @Composable
-private fun SchemeSelector(state: DrukUiState, actions: DrukViewModel) {
-    SectionLabel("Drinking schemes", "(tap to show plan)")
+private fun SchemeSelector(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
+    SectionLabel("Drinking schemes", "(tap to show plan)", spec)
     Row(
         modifier = Modifier
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = spec.pagePadding.dp),
         horizontalArrangement = Arrangement.spacedBy(11.dp)
     ) {
         TargetScheme.entries.forEach { scheme ->
             val selected = state.settings.selectedScheme == scheme
             val plan = state.profile?.let { BacEngine.schemePlan(scheme, it, state.settings.foodLevel) }
-            SchemeCard(scheme, plan, selected) {
+            SchemeCard(scheme, plan, selected, spec) {
                 actions.selectScheme(if (selected) null else scheme)
             }
         }
@@ -536,16 +639,16 @@ private fun SchemeSelector(state: DrukUiState, actions: DrukViewModel) {
 }
 
 @Composable
-private fun SchemeCard(scheme: TargetScheme, plan: com.druk.app.domain.SchemePlan?, selected: Boolean, onClick: () -> Unit) {
+private fun SchemeCard(scheme: TargetScheme, plan: com.druk.app.domain.SchemePlan?, selected: Boolean, spec: DesignSpec, onClick: () -> Unit) {
     val color = scheme.color()
     Column(
         modifier = Modifier
-            .width(205.dp)
+            .width(spec.schemeWidth.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(MonkSurface2)
             .border(if (selected) 1.5.dp else 1.dp, if (selected) color else MonkBorder, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(16.dp),
+            .padding(spec.cardPadding.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -564,9 +667,9 @@ private fun SchemeCard(scheme: TargetScheme, plan: com.druk.app.domain.SchemePla
 }
 
 @Composable
-private fun PlanGuide(state: DrukUiState) {
-    SectionLabel("Your drinking guide")
-    DarkCard(modifier = Modifier.padding(horizontal = 16.dp), backgroundColor = MonkSurface1, radius = 14, padding = 0) {
+private fun PlanGuide(state: DrukUiState, spec: DesignSpec) {
+    SectionLabel("Your drinking guide", spec = spec)
+    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = MonkSurface1, radius = spec.cardRadius, padding = 0) {
         val plan = state.selectedPlan
         val scheme = state.settings.selectedScheme
         val profile = state.profile
@@ -604,17 +707,19 @@ private fun PlanGuide(state: DrukUiState) {
                 strong("${plan.totalMlToReach}ml")
                 append(" instead of the empty-stomach ${(plan.emptyStomachPegs * 30).toInt()}ml.")
             }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.20f))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                MetaRow("Your Seidl r", OneDecimal.format(profile.r))
-                MetaRow("Distribution mass", "${OneDecimal.format(plan.distributionMassKg)} kg")
-                MetaRow("Effective g per 30ml peg", "${OneDecimal.format(plan.effectiveGramsPerPeg)}g after deficit")
-                MetaRow("Formula", "Seidl 2000 + Widmark 1932")
+            if (spec.showFullGuide) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.20f))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    MetaRow("Your Seidl r", OneDecimal.format(profile.r))
+                    MetaRow("Distribution mass", "${OneDecimal.format(plan.distributionMassKg)} kg")
+                    MetaRow("Effective g per 30ml peg", "${OneDecimal.format(plan.effectiveGramsPerPeg)}g after deficit")
+                    MetaRow("Formula", "Seidl 2000 + Widmark 1932")
+                }
             }
             Text(
                 "Real BAC varies ±30% with hydration, sleep, medications and individual enzyme differences. Never drive.",
@@ -633,9 +738,9 @@ private fun PlanGuide(state: DrukUiState) {
 }
 
 @Composable
-private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: TargetScheme?) {
-    SectionLabel("BAC curve")
-    DarkCard(modifier = Modifier.padding(horizontal = 16.dp), backgroundColor = MonkSurface1, radius = 14) {
+private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: TargetScheme?, spec: DesignSpec) {
+    SectionLabel("BAC curve", spec = spec)
+    DarkCard(modifier = Modifier.padding(horizontal = spec.pagePadding.dp), backgroundColor = MonkSurface1, radius = spec.cardRadius, padding = spec.cardPadding) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
@@ -673,9 +778,9 @@ private fun BacCurve(actual: List<BacPoint>, target: List<BacPoint>, scheme: Tar
 }
 
 @Composable
-private fun TimelineCard(items: List<TimelineItem>, actions: DrukViewModel, state: DrukUiState) {
-    SectionLabel("Timeline")
-    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+private fun TimelineCard(items: List<TimelineItem>, actions: DrukViewModel, state: DrukUiState, spec: DesignSpec) {
+    SectionLabel("Timeline", spec = spec)
+    Column(modifier = Modifier.padding(horizontal = spec.pagePadding.dp)) {
         if (items.isEmpty()) {
             Text("Nothing logged yet.", color = MonkMuted, fontFamily = Serif, fontStyle = FontStyle.Italic, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
         } else {
@@ -726,10 +831,11 @@ private fun TimelineRow(item: TimelineItem, state: DrukUiState, actions: DrukVie
 }
 
 @Composable
-private fun Footer(state: DrukUiState, actions: DrukViewModel) {
+private fun Footer(state: DrukUiState, actions: DrukViewModel, spec: DesignSpec) {
     Column(
         modifier = Modifier
-            .padding(horizontal = 16.dp, vertical = 22.dp)
+            .padding(horizontal = spec.pagePadding.dp, vertical = 16.dp)
+            .navigationBarsPadding()
             .border(0.5.dp, MonkBorder)
             .padding(top = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -772,7 +878,7 @@ private fun DarkCard(
 }
 
 @Composable
-private fun SectionLabel(title: String, small: String? = null) {
+private fun SectionLabel(title: String, small: String? = null, spec: DesignSpec) {
     Text(
         buildAnnotatedString {
             append(title.uppercase())
@@ -786,7 +892,7 @@ private fun SectionLabel(title: String, small: String? = null) {
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 2.sp,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp)
+        modifier = Modifier.padding(start = spec.pagePadding.dp, end = spec.pagePadding.dp, top = 8.dp)
     )
 }
 

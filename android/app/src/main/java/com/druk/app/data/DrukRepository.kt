@@ -49,7 +49,7 @@ class DrukRepository(context: Context) {
 
     suspend fun logDrink(
         profile: UserProfile,
-        settings: AppSettings,
+        foodLevel: FoodLevel,
         volumeMl: Double,
         abv: Double,
         nowMillis: Long
@@ -69,7 +69,7 @@ class DrukRepository(context: Context) {
                 abv = abv,
                 gramsAlcohol = grams,
                 calories = calories,
-                foodLevel = settings.foodLevel.name
+                foodLevel = foodLevel.name
             )
         )
     }
